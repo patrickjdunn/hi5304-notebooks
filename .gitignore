@@ -1,0 +1,1 @@
+.env\n*.csv\n*.parquet\n/data/
