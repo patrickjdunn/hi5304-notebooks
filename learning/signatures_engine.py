@@ -1,109 +1,74 @@
 """
-signatures_engine.py
+signatures_engine.py (refactored)
 
-A Signatures “orchestrator” that:
-1) collects Signatures inputs (question + behavioral core + condition modifiers + engagement drivers)
-2) collects clinical / biomarker inputs (for calculators)
-3) runs measurement hooks using your combined_calculator.py (MyLifeCheck + PREVENT + CHA2DS2-VASc + cardiac rehab + healthy day at home)
-4) emits an LLM-ready payload (JSON)
+Goals:
+- Reuse clinical inputs from combined_calculator.py if they already exist.
+- Do NOT require re-entry; do NOT require values that aren't available.
+- Provide dictionary-based message libraries for:
+  behavioral core, condition modifiers, engagement drivers, security rules, action plans, and content links.
 
-This file is designed to be robust in interactive CLI use:
-- validates driver values (-1,0,1)
-- never crashes on blank inputs
-- supports importing a calculator module from an arbitrary file path
-
-It expects your calculator file at:
-  /mnt/data/combined_calculator (6).py   :contentReference[oaicite:0]{index=0}
-You can change CALCULATOR_PATH below if needed.
+Design notes:
+- "Clinical inputs" are treated as a dict and may be partial/incomplete.
+- Each calculator runs only if its required minimum inputs are present.
+- Messaging is assembled via a simple "message registry" (dicts).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 import importlib.util
 import json
-import sys
 
 
 # -----------------------------
-# 0) Configure calculator module path
+# 0) Calculator module loading
 # -----------------------------
 
-# Default to the uploaded filename (works even with spaces/parentheses)
-CALCULATOR_PATH = Path(__file__).parent / "combined_calculator.py" # :contentReference[oaicite:1]{index=1}
+CALCULATOR_PATH = Path(__file__).parent / "combined_calculator.py"
 CALCULATOR_MODULE_NAME = "combined_calculator_runtime"
 
 
-# -----------------------------
-# 1) Dynamic import helper
-# -----------------------------
-
 def import_module_from_path(path: Path, module_name: str):
-    """
-    Import a Python module from an arbitrary file path.
-    This avoids needing to rename files like "combined_calculator (6).py".
-    """
     if not path.exists():
         raise FileNotFoundError(f"Calculator module not found at: {path}")
-
     spec = importlib.util.spec_from_file_location(module_name, str(path))
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not create import spec for: {path}")
-
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[attr-defined]
-    return module
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+    return mod
 
 
 # -----------------------------
-# 2) Signatures input model
+# 1) Signatures input model
 # -----------------------------
 
 DRIVER_CODES = {"PR", "RC", "SE", "GO", "ID", "HL", "DS", "TR", "FI", "HI", "AX"}
-# Conditions can be whatever you use, but these are common examples:
-KNOWN_CONDITION_CODES = {"CD", "HF", "HT", "DM", "CKD", "CKM", "AF", "STROKE"}
 
 @dataclass
 class SignaturesInput:
     question: str
-    behavioral_core: str                 # e.g., "PA", "BP", "NUT", "MA"
-    condition_modifiers: Dict[str, int]  # e.g., {"CD":1,"HT":1}
-    engagement_drivers: Dict[str, int]   # -1 not present, 0 unknown, +1 present
+    behavioral_core: str                 # e.g. "PA", "BP", "NUT"
+    condition_modifiers: Dict[str, int]  # 0/1
+    engagement_drivers: Dict[str, int]   # -1/0/+1
 
 
 def normalize_codes(si: SignaturesInput) -> Dict[str, int]:
-    """
-    Build a unified code vector.
-    - behavioral core and conditions: 1 present, 0 not present
-    - engagement drivers: -1, 0, +1
-    """
     codes: Dict[str, int] = {}
     codes[si.behavioral_core] = 1
-
     for c, v in si.condition_modifiers.items():
         codes[c] = 1 if int(v) == 1 else 0
-
     for d, v in si.engagement_drivers.items():
         if v not in (-1, 0, 1):
             raise ValueError(f"Driver {d} must be -1, 0, or 1; got {v}")
         codes[d] = v
-
     return codes
 
 
 # -----------------------------
-# 3) Clinical inputs model (flexible dict)
-# -----------------------------
-
-@dataclass
-class ClinicalInputs:
-    data: Dict[str, Any]
-
-
-# -----------------------------
-# 4) Measurement outputs + full payload
+# 2) Payload model
 # -----------------------------
 
 @dataclass
@@ -122,136 +87,202 @@ class SignaturesPayload:
     behavioral_core: str
     active_conditions: List[str]
     active_drivers: List[str]
-    measurement: MeasurementResults = field(default_factory=MeasurementResults)
 
-    # You can expand these later as you re-integrate your taxonomy content blocks
+    # Assembled messaging outputs:
+    behavioral_core_messages: List[str] = field(default_factory=list)
+    condition_modifier_messages: List[str] = field(default_factory=list)
+    engagement_driver_messages: List[str] = field(default_factory=list)
     security_rules: List[str] = field(default_factory=list)
     action_plans: List[str] = field(default_factory=list)
-    sources: List[Dict[str, str]] = field(default_factory=list)
+
+    # Measurement + content
+    measurement: MeasurementResults = field(default_factory=MeasurementResults)
+    content_links: List[Dict[str, str]] = field(default_factory=list)  # [{"title":..., "url":..., "org":...}]
 
 
 # -----------------------------
-# 5) Hook routing
+# 3) Message libraries (dictionaries)
+#
+# Best practice: keep these in a separate file later (e.g., signatures_content.py).
+# For now, they live here for clarity.
 # -----------------------------
 
-def should_run_mylifecheck(behavior: str, codes: Dict[str, int]) -> bool:
-    # Run for most lifestyle/monitoring behaviors or CKM framing
-    return behavior in {"PA", "BP", "NUT", "SL", "TOB", "WT", "GLU", "CHOL"} or codes.get("CKM", 0) == 1
+# A) Behavioral core messages keyed by behavior code
+BEHAVIORAL_CORE_MESSAGES: Dict[str, str] = {
+    "PA": "Start with safe, manageable movement and build consistency. Walking is a great place to begin.",
+    "BP": "Know your numbers and track patterns over time. Small changes can add up to meaningful blood pressure improvement.",
+    "NUT": "Focus on simple, repeatable improvements—more whole foods, fewer ultra-processed foods, and mindful portions.",
+    "SL": "Aim for consistent sleep timing and a wind-down routine to support recovery and cardiometabolic health.",
+    "MA": "Medications work best when taken consistently. Pair doses with daily routines and keep an updated medication list.",
+    "SY": "Track symptoms and trends, not single moments. Write down what you notice and share patterns with your clinician.",
+    "SM": "Stress management is a health skill. Small daily practices can lower strain and support better decisions."
+}
 
+# B) Condition modifier messages keyed by (behavior_code, condition_code)
+CONDITION_MODIFIER_MESSAGES: Dict[Tuple[str, str], str] = {
+    ("PA", "CD"): "With coronary artery disease, start gradually and progress slowly. If available, begin with supervised guidance like cardiac rehab.",
+    ("PA", "HF"): "With heart failure, begin with short, low-intensity activity and rest as needed. Consistency matters more than intensity.",
+    ("BP", "CKD"): "With kidney disease, blood pressure targets and medications may be adjusted to protect kidney function—coordinate closely with your care team.",
+    ("NUT", "CKD"): "With kidney disease, nutrition may require tailored guidance (sodium, potassium, phosphorus)—ask for kidney-specific recommendations."
+}
 
-def should_run_prevent(behavior: str, codes: Dict[str, int]) -> bool:
-    # Run if HT/CD/CKD/CKM or exercise/BP behavior
-    return any(codes.get(k, 0) == 1 for k in ("HT", "CD", "CKD", "CKM")) or behavior in {"PA", "BP"}
+# C) Engagement driver messages keyed by (behavior_code, driver_code)
+ENGAGEMENT_DRIVER_MESSAGES: Dict[Tuple[str, str], str] = {
+    ("PA", "PR"): "Set a simple starting goal (like minutes walked) and increase gradually each week.",
+    ("PA", "HL"): "Keep it simple: if you can move and still talk, the intensity is usually about right.",
+    ("BP", "GO"): "Write down a clear blood pressure goal and track readings consistently so you can see progress.",
+    ("NUT", "SE"): "Pick one change you’re confident you can do this week—success builds confidence for the next step."
+}
 
+# D) Security rules keyed by (behavior_code, optional condition_code)
+# Use (behavior, None) for generic; (behavior, "CD") etc. for condition-specific.
+SECURITY_RULES: Dict[Tuple[str, Optional[str]], str] = {
+    ("PA", None): "If you feel faint, severely short of breath, or unwell during exercise, stop and seek medical guidance.",
+    ("PA", "CD"): "If you experience chest pain, pressure, or tightness during exercise, stop immediately and contact your healthcare professional.",
+    ("BP", None): "If your blood pressure is 180/120 or higher with symptoms (chest pain, shortness of breath, weakness, vision/speech changes), seek emergency care."
+}
 
-def should_run_chads2vasc(codes: Dict[str, int], clinical: Dict[str, Any]) -> bool:
-    # Prefer AF flag; allow either a condition modifier "AF" or clinical flag
-    if codes.get("AF", 0) == 1:
-        return True
-    val = str(clinical.get("atrial_fibrillation", "")).strip().lower()
-    return val in {"yes", "y", "true", "1"}
+# E) Action plans keyed by (behavior_code, optional condition_code)
+ACTION_PLANS: Dict[Tuple[str, Optional[str]], str] = {
+    ("PA", None): "Start with a short daily walk plan and increase time gradually. Consider a weekly schedule you can repeat.",
+    ("PA", "CD"): "Ask about enrolling in a cardiac rehabilitation program for supervised exercise and education.",
+    ("BP", None): "Use a home blood pressure monitor, log readings (morning/evening), and review trends with your clinician."
+}
 
-
-def should_run_cardiac_rehab(codes: Dict[str, int], clinical: Dict[str, Any]) -> bool:
-    # Often useful for CD/HF or after events; you can tighten this later
-    return any(codes.get(k, 0) == 1 for k in ("CD", "HF")) or any(
-        str(clinical.get(k, "No")).strip().lower() == "yes"
-        for k in ("AMI", "PCI", "CABG", "cardiac_arrest", "heart_failure")
-    )
-
-
-def should_run_healthy_day_at_home(_: Dict[str, int], __: Dict[str, Any]) -> bool:
-    # Useful for most self-management flows
-    return True
+# F) Content links keyed by topic tags (behavior, condition, or a named topic)
+# You can attach multiple links per question.
+CONTENT_LINKS: Dict[str, Dict[str, str]] = {
+    "PA": {"org": "American Heart Association", "title": "Physical Activity Recommendations", "url": "https://www.heart.org/en/healthy-living/fitness"},
+    "BP": {"org": "American Heart Association", "title": "Understanding Blood Pressure Readings", "url": "https://www.heart.org/en/health-topics/high-blood-pressure/understanding-blood-pressure-readings"},
+    "CD": {"org": "American Heart Association", "title": "Exercise and Heart Disease", "url": "https://www.heart.org/en/health-topics/consumer-healthcare/what-is-cardiovascular-disease/exercise-and-heart-disease"},
+    "CARDIAC_REHAB": {"org": "American Heart Association", "title": "Cardiac Rehabilitation", "url": "https://www.heart.org/en/health-topics/cardiac-rehab"},
+    "MYLIFECHECK": {"org": "American Heart Association", "title": "My Life Check (Life’s Essential 8)", "url": "https://www.heart.org/en/healthy-living/healthy-lifestyle/my-life-check"}
+}
 
 
 # -----------------------------
-# 6) Calculator adapters (tolerant of different function names)
+# 4) Clinical inputs reuse: pull from combined_calculator if available
 # -----------------------------
 
-def _has_attr(mod, name: str) -> bool:
-    return hasattr(mod, name) and callable(getattr(mod, name))
-
-
-def run_mylifecheck(calc_mod, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def extract_clinical_inputs(calc_mod) -> Dict[str, Any]:
     """
-    Try common entrypoints. If your combined_calculator already exposes a function, we call it.
-    Otherwise return None and let you add a wrapper in the calculator file.
+    Attempts to reuse clinical input values from combined_calculator.py so they don't need reentry.
+
+    Supported patterns (any one is enough):
+    - calc_mod.INPUTS  (dict)
+    - calc_mod.inputs  (dict)
+    - calc_mod.get_inputs() -> dict
+    - calc_mod.get_latest_inputs() -> dict
+
+    If none found, returns {}.
     """
-    # Preferred wrapper name:
-    if _has_attr(calc_mod, "run_mylifecheck"):
-        return calc_mod.run_mylifecheck(inputs)
+    for name in ("INPUTS", "inputs"):
+        if hasattr(calc_mod, name):
+            val = getattr(calc_mod, name)
+            if isinstance(val, dict):
+                return val
 
-    # Common alternative:
-    if _has_attr(calc_mod, "calculate_mylifecheck"):
-        return calc_mod.calculate_mylifecheck(inputs)
+    for fn_name in ("get_inputs", "get_latest_inputs"):
+        if hasattr(calc_mod, fn_name) and callable(getattr(calc_mod, fn_name)):
+            try:
+                val = getattr(calc_mod, fn_name)()
+                if isinstance(val, dict):
+                    return val
+            except Exception:
+                pass
 
-    # If your file computes MyLifeCheck only in a main/script section, you’ll want to add a wrapper.
+    return {}
+
+
+# -----------------------------
+# 5) Calculator runners with "only if available" behavior
+# -----------------------------
+
+def _call_if_exists(calc_mod, fn_name: str, *args, **kwargs) -> Optional[Any]:
+    if hasattr(calc_mod, fn_name) and callable(getattr(calc_mod, fn_name)):
+        return getattr(calc_mod, fn_name)(*args, **kwargs)
     return None
 
 
-def run_prevent(calc_mod, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if _has_attr(calc_mod, "run_prevent"):
-        return calc_mod.run_prevent(inputs)
-
-    if _has_attr(calc_mod, "calculate_prevent"):
-        return calc_mod.calculate_prevent(inputs)
-
-    return None
+def have_keys(d: Dict[str, Any], keys: List[str]) -> bool:
+    return all(k in d and d[k] not in (None, "") for k in keys)
 
 
-def run_chads2vasc(calc_mod, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if _has_attr(calc_mod, "run_chads2vasc"):
-        return calc_mod.run_chads2vasc(inputs)
+def run_mylifecheck(calc_mod, clinical: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    # If combined_calculator exposes a wrapper, use it.
+    out = _call_if_exists(calc_mod, "run_mylifecheck", clinical)
+    if out is not None:
+        return out
 
-    # If you expose a raw calculator:
-    if _has_attr(calc_mod, "calculate_chads2vasc"):
-        # Expect typical CHA2DS2-VASc inputs; fall back to defaults if missing.
+    # Otherwise: if it has a known calculator fn name, try it.
+    out = _call_if_exists(calc_mod, "calculate_mylifecheck", clinical)
+    return out
+
+
+def run_prevent(calc_mod, clinical: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    out = _call_if_exists(calc_mod, "run_prevent", clinical)
+    if out is not None:
+        return out
+    out = _call_if_exists(calc_mod, "calculate_prevent", clinical)
+    return out
+
+
+def run_chads2vasc(calc_mod, clinical: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    out = _call_if_exists(calc_mod, "run_chads2vasc", clinical)
+    if out is not None:
+        return out
+
+    # Try raw calc if present and minimum inputs exist
+    if hasattr(calc_mod, "calculate_chads2vasc") and callable(calc_mod.calculate_chads2vasc):
+        required = ["age", "gender"]
+        if not have_keys(clinical, required):
+            return None
         score = calc_mod.calculate_chads2vasc(
-            age=inputs.get("age"),
-            gender=inputs.get("gender"),
-            heart_failure=inputs.get("heart_failure", "No"),
-            hypertension=inputs.get("hypertension", "No"),
-            diabetes=inputs.get("diabetes", "No"),
-            stroke_or_tia=inputs.get("stroke_or_tia", "No"),
-            vascular_disease=inputs.get("vascular_disease", "No"),
+            age=clinical.get("age"),
+            gender=clinical.get("gender"),
+            heart_failure=clinical.get("heart_failure", "No"),
+            hypertension=clinical.get("hypertension", "No"),
+            diabetes=clinical.get("diabetes", "No"),
+            stroke_or_tia=clinical.get("stroke_or_tia", "No"),
+            vascular_disease=clinical.get("vascular_disease", "No"),
         )
         return {"chads2vasc": score}
 
     return None
 
 
-def run_cardiac_rehab(calc_mod, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if _has_attr(calc_mod, "run_cardiac_rehab_eligibility"):
-        return calc_mod.run_cardiac_rehab_eligibility(inputs)
+def run_cardiac_rehab(calc_mod, clinical: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    out = _call_if_exists(calc_mod, "run_cardiac_rehab_eligibility", clinical)
+    if out is not None:
+        return out
 
-    if _has_attr(calc_mod, "calculate_cardiac_rehab_eligibility"):
+    if hasattr(calc_mod, "calculate_cardiac_rehab_eligibility") and callable(calc_mod.calculate_cardiac_rehab_eligibility):
+        # These can be missing; default "No"
         eligible = calc_mod.calculate_cardiac_rehab_eligibility(
-            CABG=inputs.get("CABG", "No"),
-            AMI=inputs.get("AMI", "No"),
-            PCI=inputs.get("PCI", "No"),
-            cardiac_arrest=inputs.get("cardiac_arrest", "No"),
-            heart_failure=inputs.get("heart_failure", "No"),
+            CABG=clinical.get("CABG", "No"),
+            AMI=clinical.get("AMI", "No"),
+            PCI=clinical.get("PCI", "No"),
+            cardiac_arrest=clinical.get("cardiac_arrest", "No"),
+            heart_failure=clinical.get("heart_failure", "No"),
         )
         return {"cardiac_rehab_eligible": eligible}
 
     return None
 
 
-def run_healthy_day_at_home(calc_mod, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if _has_attr(calc_mod, "run_healthy_day_at_home"):
-        return calc_mod.run_healthy_day_at_home(inputs)
+def run_healthy_day_at_home(calc_mod, clinical: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    out = _call_if_exists(calc_mod, "run_healthy_day_at_home", clinical)
+    if out is not None:
+        return out
 
-    if _has_attr(calc_mod, "healthy_day_at_home"):
-        # Your earlier signature examples used:
-        # healthy_day_at_home(symptoms, step_count, unplanned_visits, medication_adherence)
+    if hasattr(calc_mod, "healthy_day_at_home") and callable(calc_mod.healthy_day_at_home):
+        # If missing, default gently
         result = calc_mod.healthy_day_at_home(
-            symptoms=inputs.get("symptoms", 0),
-            step_count=inputs.get("step_count", 0),
-            unplanned_visits=inputs.get("unplanned_visits", 0),
-            medication_adherence=inputs.get("medication_adherence", 1),
+            symptoms=clinical.get("symptoms", 0),
+            step_count=clinical.get("step_count", 0),
+            unplanned_visits=clinical.get("unplanned_visits", 0),
+            medication_adherence=clinical.get("medication_adherence", 0),
         )
-        # Could be tuple or dict depending on your implementation:
         if isinstance(result, tuple) and len(result) == 2:
             score, note = result
             return {"healthy_day_score": score, "healthy_day_message": note}
@@ -261,19 +292,99 @@ def run_healthy_day_at_home(calc_mod, inputs: Dict[str, Any]) -> Optional[Dict[s
 
 
 # -----------------------------
-# 7) Build payload
+# 6) Hook routing: decide what to run (based on codes + availability)
 # -----------------------------
 
-def build_payload(sig: SignaturesInput, clinical: ClinicalInputs, calc_mod) -> SignaturesPayload:
+def should_run_mylifecheck(behavior: str, codes: Dict[str, int]) -> bool:
+    return behavior in {"PA", "BP", "NUT", "SL", "TOB"} or codes.get("CKM", 0) == 1
+
+def should_run_prevent(behavior: str, codes: Dict[str, int]) -> bool:
+    return any(codes.get(k, 0) == 1 for k in ("HT", "CD", "CKD", "CKM")) or behavior in {"PA", "BP"}
+
+def should_run_chads2vasc(codes: Dict[str, int], clinical: Dict[str, Any]) -> bool:
+    af_flag = codes.get("AF", 0) == 1 or str(clinical.get("atrial_fibrillation", "")).strip().lower() in {"yes", "y", "true", "1"}
+    return af_flag
+
+def should_run_cardiac_rehab(codes: Dict[str, int]) -> bool:
+    return codes.get("CD", 0) == 1 or codes.get("HF", 0) == 1
+
+def should_run_healthy_day(_: Dict[str, int]) -> bool:
+    return True
+
+
+# -----------------------------
+# 7) Messaging assembly (using dictionaries)
+# -----------------------------
+
+def assemble_messages(payload: SignaturesPayload) -> None:
+    b = payload.behavioral_core
+    codes = payload.codes
+
+    # Behavioral core message
+    if b in BEHAVIORAL_CORE_MESSAGES:
+        payload.behavioral_core_messages.append(BEHAVIORAL_CORE_MESSAGES[b])
+
+    # Condition modifier messages (only if condition present == 1)
+    for cond in payload.active_conditions:
+        msg = CONDITION_MODIFIER_MESSAGES.get((b, cond))
+        if msg:
+            payload.condition_modifier_messages.append(msg)
+
+    # Engagement driver messages (only drivers > 0)
+    for drv in payload.active_drivers:
+        msg = ENGAGEMENT_DRIVER_MESSAGES.get((b, drv))
+        if msg:
+            payload.engagement_driver_messages.append(msg)
+
+    # Security rules: prefer condition-specific, fallback to generic
+    # If multiple conditions, add those that exist; always consider generic too.
+    added_any = False
+    for cond in payload.active_conditions:
+        rule = SECURITY_RULES.get((b, cond))
+        if rule:
+            payload.security_rules.append(rule)
+            added_any = True
+    generic_rule = SECURITY_RULES.get((b, None))
+    if generic_rule and not added_any:
+        payload.security_rules.append(generic_rule)
+
+    # Action plans: prefer condition-specific, fallback to generic
+    added_any = False
+    for cond in payload.active_conditions:
+        plan = ACTION_PLANS.get((b, cond))
+        if plan:
+            payload.action_plans.append(plan)
+            added_any = True
+    generic_plan = ACTION_PLANS.get((b, None))
+    if generic_plan and not added_any:
+        payload.action_plans.append(generic_plan)
+
+    # Content links: attach by behavior + any key conditions + named topics
+    if b in CONTENT_LINKS:
+        payload.content_links.append(CONTENT_LINKS[b])
+    for cond in payload.active_conditions:
+        if cond in CONTENT_LINKS:
+            payload.content_links.append(CONTENT_LINKS[cond])
+
+    # If action plan implies cardiac rehab, attach link
+    if any("cardiac rehabilitation" in p.lower() for p in payload.action_plans):
+        payload.content_links.append(CONTENT_LINKS["CARDIAC_REHAB"])
+
+    # Always include MyLifeCheck link when hooks are possible (optional)
+    payload.content_links.append(CONTENT_LINKS["MYLIFECHECK"])
+
+
+# -----------------------------
+# 8) Build payload end-to-end
+# -----------------------------
+
+def build_payload(sig: SignaturesInput, calc_mod) -> SignaturesPayload:
     codes = normalize_codes(sig)
 
-    # active conditions: present and not engagement drivers
     active_conditions = [
         k for k, v in codes.items()
         if v == 1 and k.isupper() and k not in DRIVER_CODES and k != sig.behavioral_core
     ]
-
-    # active drivers: > 0 only
     active_drivers = [k for k, v in codes.items() if k in DRIVER_CODES and v > 0]
 
     payload = SignaturesPayload(
@@ -284,97 +395,43 @@ def build_payload(sig: SignaturesInput, clinical: ClinicalInputs, calc_mod) -> S
         active_drivers=active_drivers,
     )
 
-    data = clinical.data
+    # Pull clinical inputs from combined_calculator if available (no re-entry)
+    clinical = extract_clinical_inputs(calc_mod)
 
-    # Measurements
+    # Measurements (only run if:
+    # - routing says yes
+    # - calculator wrappers exist
+    # - and/or minimum inputs exist inside the calculator)
     if should_run_mylifecheck(sig.behavioral_core, codes):
-        payload.measurement.mylifecheck = run_mylifecheck(calc_mod, data)
+        payload.measurement.mylifecheck = run_mylifecheck(calc_mod, clinical)
 
     if should_run_prevent(sig.behavioral_core, codes):
-        payload.measurement.prevent = run_prevent(calc_mod, data)
+        payload.measurement.prevent = run_prevent(calc_mod, clinical)
 
-    if should_run_chads2vasc(codes, data):
-        payload.measurement.chads2vasc = run_chads2vasc(calc_mod, data)
+    if should_run_chads2vasc(codes, clinical):
+        payload.measurement.chads2vasc = run_chads2vasc(calc_mod, clinical)
 
-    if should_run_cardiac_rehab(codes, data):
-        payload.measurement.cardiac_rehab = run_cardiac_rehab(calc_mod, data)
+    if should_run_cardiac_rehab(codes):
+        payload.measurement.cardiac_rehab = run_cardiac_rehab(calc_mod, clinical)
 
-    if should_run_healthy_day_at_home(codes, data):
-        payload.measurement.healthy_day_at_home = run_healthy_day_at_home(calc_mod, data)
+    if should_run_healthy_day(codes):
+        payload.measurement.healthy_day_at_home = run_healthy_day_at_home(calc_mod, clinical)
 
-    # Starter security rules + action plans (you can swap these for registry-driven content later)
-    if sig.behavioral_core == "PA":
-        payload.security_rules.append(
-            "SECURITY STOP RULE: If you experience chest pain during exercise, stop immediately and contact your healthcare professional."
-        )
-        if codes.get("CD", 0) == 1 or str(data.get("heart_failure", "No")).strip().lower() == "yes":
-            payload.action_plans.append("ACTION PLAN: Recommend a cardiac rehabilitation program if eligible.")
-
-    if codes.get("AF", 0) == 1 and payload.measurement.chads2vasc:
-        payload.action_plans.append("ACTION PLAN: Discuss stroke prevention options (anticoagulation) based on CHA₂DS₂-VASc score with your clinician.")
+    # Assemble messages + links
+    assemble_messages(payload)
 
     return payload
 
 
 # -----------------------------
-# 8) CLI helpers (robust input parsing)
+# 9) CLI: Signatures inputs only (no clinical re-entry)
 # -----------------------------
 
-def _prompt_nonempty(prompt: str) -> str:
-    while True:
-        s = input(prompt).strip()
-        if s:
-            return s
-        print("⚠️  Please enter a value.")
-
-
-def _prompt_int(prompt: str, *, allow_blank: bool = False, default: Optional[int] = None) -> Optional[int]:
-    while True:
-        raw = input(prompt).strip()
-        if raw == "":
-            if allow_blank:
-                return default
-            print("⚠️  Please enter an integer.")
-            continue
-        try:
-            return int(raw)
-        except ValueError:
-            print("⚠️  Invalid integer. Try again.")
-
-
-def _prompt_float(prompt: str, *, allow_blank: bool = False, default: Optional[float] = None) -> Optional[float]:
-    while True:
-        raw = input(prompt).strip()
-        if raw == "":
-            if allow_blank:
-                return default
-            print("⚠️  Please enter a number.")
-            continue
-        try:
-            return float(raw)
-        except ValueError:
-            print("⚠️  Invalid number. Try again.")
-
-
-def _prompt_yes_no(prompt: str, default: str = "No") -> str:
-    """
-    Returns 'Yes' or 'No'
-    """
-    raw = input(f"{prompt} (Yes/No) [default {default}]: ").strip().lower()
-    if raw == "":
-        return default
-    if raw in {"y", "yes", "true", "1"}:
-        return "Yes"
-    if raw in {"n", "no", "false", "0"}:
-        return "No"
-    print("⚠️  Please enter Yes or No. Using default.")
-    return default
-
-
 def prompt_signatures_input() -> SignaturesInput:
-    print("\n=== Signatures Input ===")
-    question = _prompt_nonempty("Enter the question: ")
-    behavioral_core = _prompt_nonempty("Behavioral core code (e.g., PA, BP, NUT, MA): ").upper()
+    print("\n=== Signatures Input (no clinical re-entry) ===")
+    question = input("Enter the question: ").strip()
+
+    behavioral_core = input("Behavioral core code (e.g., PA, BP, NUT, MA): ").strip().upper()
 
     print("\nCondition modifiers (enter codes like CD, HT, CKD, AF; blank to stop).")
     condition_mods: Dict[str, int] = {}
@@ -382,11 +439,6 @@ def prompt_signatures_input() -> SignaturesInput:
         c = input("Condition code (blank to stop): ").strip().upper()
         if not c:
             break
-        # if you want to enforce known codes, uncomment:
-        # if c not in KNOWN_CONDITION_CODES:
-        #     print(f"⚠️  Unknown condition code '{c}'. Keep it anyway? (y/n)")
-        #     if input().strip().lower() not in {"y","yes"}:
-        #         continue
         condition_mods[c] = 1
 
     print("\nEngagement drivers (enter code + value: -1 not present, 0 unknown, 1 present; blank driver to stop).")
@@ -396,22 +448,18 @@ def prompt_signatures_input() -> SignaturesInput:
         if not d:
             break
 
-        if d not in DRIVER_CODES:
-            print(f"⚠️  '{d}' not in known driver codes {sorted(DRIVER_CODES)}. Keeping anyway.")
-
-        # Robust: re-prompt until valid (-1,0,1)
         while True:
-            raw = input("Value (-1 not present, 0 unknown, 1 present): ").strip()
+            raw = input("Value (-1, 0, 1): ").strip()
             if raw == "":
-                print("⚠️  Please enter -1, 0, or 1 (blank is not allowed here).")
+                print("⚠️ Please enter -1, 0, or 1.")
                 continue
             try:
                 v = int(raw)
             except ValueError:
-                print("⚠️  Invalid input. Enter -1, 0, or 1.")
+                print("⚠️ Invalid. Enter -1, 0, or 1.")
                 continue
             if v not in (-1, 0, 1):
-                print("⚠️  Value must be -1, 0, or 1.")
+                print("⚠️ Must be -1, 0, or 1.")
                 continue
             drivers[d] = v
             break
@@ -424,124 +472,33 @@ def prompt_signatures_input() -> SignaturesInput:
     )
 
 
-def prompt_clinical_inputs_minimal() -> ClinicalInputs:
-    """
-    Minimal clinical inputs for common calculators.
-    Add fields as your combined_calculator requires.
-    """
-    print("\n=== Clinical Inputs (minimal starter set) ===")
-
-    age = _prompt_int("Age: ")
-    gender = _prompt_nonempty("Gender (male/female): ").lower()
-
-    sbp = _prompt_float("Systolic BP (mmHg): ")
-    dbp = _prompt_float("Diastolic BP (mmHg): ")
-
-    tc = _prompt_float("Total cholesterol (mg/dL): ", allow_blank=True, default=None)
-    hdl = _prompt_float("HDL cholesterol (mg/dL): ", allow_blank=True, default=None)
-
-    diabetes = _prompt_yes_no("Diabetes?")
-    # Use your preferred encoding (string categories) if your PREVENT code expects that:
-    tobacco_use = input("Tobacco use (Current user/Former smoker/Never used) [blank ok]: ").strip()
-
-    # Optional PREVENT-ish extras (blank ok)
-    bmi = _prompt_float("BMI [blank ok]: ", allow_blank=True, default=None)
-    egfr = _prompt_float("eGFR [blank ok]: ", allow_blank=True, default=None)
-    bptreat = _prompt_yes_no("On blood pressure medication (bptreat)?")
-
-    # AF (for CHA2DS2-VASc routing)
-    af = _prompt_yes_no("Atrial fibrillation?")
-
-    # Cardiac rehab eligibility flags
-    ami = _prompt_yes_no("History of MI/AMI?")
-    pci = _prompt_yes_no("History of PCI?")
-    cabg = _prompt_yes_no("History of CABG?")
-    hf = _prompt_yes_no("Heart failure?")
-    cardiac_arrest = _prompt_yes_no("History of cardiac arrest?")
-
-    # Healthy day at home
-    symptoms = _prompt_int("Symptoms today? (0=no, 1=yes): ")
-    step_count = _prompt_int("Step count today: ", allow_blank=True, default=0)
-    unplanned_visits = _prompt_int("Unplanned visits today (0+): ", allow_blank=True, default=0)
-    medication_adherence = _prompt_int(
-        "Medication adherence (0=good, 1=inconsistent, 2=not taking) [default 0]: ",
-        allow_blank=True,
-        default=0
-    )
-
-    # Assemble dict (use keys your calculator expects; you can rename here without changing UX)
-    data: Dict[str, Any] = {
-        "age": age,
-        "gender": gender,
-        "systolic_blood_pressure": sbp,
-        "diastolic_blood_pressure": dbp,
-        "sbp": sbp,  # sometimes calculators use sbp/dbp short names
-        "dbp": dbp,
-
-        "total_cholesterol": tc,
-        "HDL_cholesterol": hdl,
-        "tc": tc,
-        "hdl": hdl,
-
-        "diabetes": diabetes,
-        "tobacco_use": tobacco_use,
-
-        "bmi": bmi,
-        "egfr": egfr,
-        "bptreat": bptreat,
-
-        "atrial_fibrillation": af,
-        "AF": af,  # optional alias
-
-        "AMI": ami,
-        "PCI": pci,
-        "CABG": cabg,
-        "heart_failure": hf,
-        "cardiac_arrest": cardiac_arrest,
-
-        "symptoms": symptoms,
-        "step_count": step_count,
-        "unplanned_visits": unplanned_visits,
-        "medication_adherence": medication_adherence,
-    }
-
-    return ClinicalInputs(data=data)
-
-
 # -----------------------------
-# 9) Main
+# 10) Main
 # -----------------------------
 
 def main() -> int:
-    # Import calculator module dynamically
     try:
         calc_mod = import_module_from_path(CALCULATOR_PATH, CALCULATOR_MODULE_NAME)
     except Exception as e:
         print(f"ERROR importing calculator module: {e}")
-        print("Tip: Update CALCULATOR_PATH at the top of this file.")
+        print(f"Looked for: {CALCULATOR_PATH.resolve()}")
         return 1
 
     sig = prompt_signatures_input()
-    clinical = prompt_clinical_inputs_minimal()
-
-    payload = build_payload(sig, clinical, calc_mod)
+    payload = build_payload(sig, calc_mod)
 
     print("\n=== Signatures Payload (LLM-ready) ===")
     print(json.dumps(asdict(payload), indent=2, default=str))
 
-    # Helpful warnings if wrappers are missing in the calculator module
-    missing = []
-    if should_run_mylifecheck(sig.behavioral_core, payload.codes) and payload.measurement.mylifecheck is None:
-        missing.append("MyLifeCheck (expected function run_mylifecheck or calculate_mylifecheck)")
-    if should_run_prevent(sig.behavioral_core, payload.codes) and payload.measurement.prevent is None:
-        missing.append("PREVENT (expected function run_prevent or calculate_prevent)")
-
-    if missing:
-        print("\n⚠️  NOTE:")
-        print("Some measurement outputs are None because the calculator module did not expose a callable wrapper.")
-        print("Add wrapper functions in your combined_calculator file (recommended) or rename functions accordingly:")
-        for m in missing:
-            print(f"- {m}")
+    # Gentle notes if clinical inputs couldn't be reused
+    clinical = extract_clinical_inputs(calc_mod)
+    if not clinical:
+        print("\n⚠️ NOTE: No clinical inputs found in combined_calculator.py.")
+        print("To reuse values automatically, expose one of these in combined_calculator.py:")
+        print("- INPUTS = {...}   (dict)")
+        print("- inputs = {...}   (dict)")
+        print("- def get_inputs(): return {...}")
+        print("- def get_latest_inputs(): return {...}")
 
     return 0
 
