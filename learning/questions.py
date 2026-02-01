@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 import re
 
 # ---------------------------------------------------------------------
-# Personas
+#Signatures
 # ---------------------------------------------------------------------
 
 PERSONAS: List[str] = ["Listener", "Motivator", "Director", "Expert"]
