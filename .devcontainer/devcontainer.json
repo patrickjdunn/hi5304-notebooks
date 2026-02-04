@@ -2,7 +2,7 @@
   "name": "HI 5304 Codespace (Python + PostgreSQL)",
   "dockerComposeFile": "docker-compose.yml",
   "service": "app",
-  "workspaceFolder": "/workspaces/hi5304-notebooks",
+  "workspaceFolder": "/workspaces/Data_Science-notebooks",
 
   "forwardPorts": [5432],
 
