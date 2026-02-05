@@ -4,8 +4,8 @@ services:
   app:
     image: mcr.microsoft.com/devcontainers/python:3.12-bookworm
     volumes:
-      - ..:/workspaces/hi5304-notebooks:cached
-    working_dir: /workspaces/hi5304-notebooks
+      - ..:/workspaces/Data_Science_Coding_Laboratory:cached
+    working_dir: /workspaces/Data_Science_Coding_Laboratory
     command: sleep infinity
     depends_on:
       - db
@@ -14,9 +14,9 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: hi5304
-      POSTGRES_USER: hi5304_user
-      POSTGRES_PASSWORD: hi5304_password
+      POSTGRES_DB: data_science
+      POSTGRES_USER: dataScience_user
+      POSTGRES_PASSWORD: data_science
     ports:
       - "5432:5432"
     volumes:
