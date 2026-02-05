@@ -1,8 +1,5 @@
 {
   "name": "Data Science Coding Laboratory",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
   "dockerComposeFile": "docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspaces/Data_Science_Coding_Laboratory",
