@@ -766,6 +766,407 @@ PACKS: Dict[str, Dict[str, Any]] = {
             },
         ],
     },
+
+    "CAD": {
+    "category": "CAD",
+    "source_defaults": [
+        {
+            "name": "American Heart Association",
+            "label": "AHA",
+            "url": "https://www.heart.org/en/health-topics/heart-attack",
+        }
+    ],
+    "questions": [
+        {
+            "title": "What caused my coronary artery disease?",
+            "question": "What caused my coronary artery disease?",
+            "keywords": ["cad", "coronary", "atherosclerosis", "risk factors"],
+            "responses": {
+                "Listener": "It’s natural to wonder ‘why me?’ Many people ask this.",
+                "Motivator": "Knowing your history can help you rewrite your future.",
+                "Director": "CAD often results from a mix of cholesterol, high blood pressure, diabetes, smoking, and genes.",
+                "Expert": "AHA science shows that atherosclerosis can build silently over decades.",
+            },
+            "signatures": {
+                "behavioral_core": ["HL"],  # Health Literacy (example tag)
+                "condition_modifiers": ["CAD"],
+                "engagement_drivers": {"TR": 1, "HL": 1, "SE": 0},  # -1/0/+1
+            },
+            "security_rules": [
+                "Seek emergency care for chest pain/pressure, shortness of breath, fainting, or stroke symptoms."
+            ],
+            "action_plans": [
+                "Ask your provider to review your personal CAD risk factors and your last lipid panel.",
+                "Pick one risk factor to target this month (LDL, BP, tobacco, activity, nutrition)."
+            ],
+            # optional; if omitted, source_defaults is used
+            # "sources": [...]
+        },
+
+                {
+        "question": "What should I eat now that I have CAD?",
+        "keywords": ["cad", "diet", "eat", "food", "sodium", "mediterranean", "dash"],
+        "signatures": {
+            "behavioral_core": "NUT",
+            "condition_modifiers": {"CAD": 1},
+            "engagement_drivers": {"HL": 1, "FI": 0, "TR": 0},
+            "signature_tags": ["CAD", "Nutrition", "DASH", "Mediterranean", "Sodium"],
+        },
+        "responses": {
+            "Listener": (
+                "There’s a lot of confusing advice out there. You’re not alone. If you tell me what you usually eat, "
+                "we can find a few heart-healthy swaps that still feel realistic."
+            ),
+            "Motivator": (
+                "You can still enjoy food—just smarter. A few upgrades (more fiber, healthier fats, less sodium) can make a real difference."
+            ),
+            "Director": (
+                "Aim for a Mediterranean- or DASH-style pattern: vegetables, fruits, whole grains, beans, nuts, fish/lean proteins. "
+                "Limit sodium, added sugar, and ultra-processed foods. Start by swapping one salty item per day."
+            ),
+            "Expert": (
+                "For CAD, evidence-based eating patterns (Mediterranean/DASH) improve blood pressure and lipids and support secondary prevention. "
+                "Reducing saturated fat and excess sodium is particularly helpful for risk reduction."
+            ),
+        },
+        "security_rules": [
+            "If you have kidney disease, heart failure, or are on fluid/salt restrictions, confirm your targets with your clinician or dietitian."
+        ],
+        "action_plans": [
+            "Keep a simple 3-day food log to identify your highest-sodium foods.",
+            "Replace one processed snack with fruit/vegetables + unsalted nuts.",
+            "Ask for a referral to a cardiac dietitian if you want a personalized plan."
+        ],
+        "sources": [
+            {"name": "AHA — Healthy eating", "url": "https://www.heart.org/en/healthy-living/healthy-eating"},
+            {"name": "AHA — Coronary artery disease (diet/lifestyle prevention context)", "url": "https://www.heart.org/en/health-topics/consumer-healthcare/what-is-cardiovascular-disease/coronary-artery-disease"},
+       
+        ],
+    
+        },
+       
+    {
+        "question": "Can I exercise safely with CAD?",
+        "keywords": ["cad", "exercise", "activity", "safe", "walking", "cardiac rehab", "stress test"],
+        "signatures": {
+            "behavioral_core": "PA",
+            "condition_modifiers": {"CAD": 1},
+            "engagement_drivers": {"SE": 1, "PR": 1, "TR": 0},
+            "signature_tags": ["CAD", "PhysicalActivity", "Safety", "CardiacRehab"],
+        },
+        "responses": {
+            "Listener": (
+                "It’s good you’re asking—many people worry about overdoing it. We can start with something gentle and build confidence safely."
+            ),
+            "Motivator": (
+                "Movement is medicine—even 10 minutes counts. Consistency matters more than intensity at first."
+            ),
+            "Director": (
+                "Start with low-to-moderate activity (like walking). Increase gradually. If you’ve had a recent event or procedure, "
+                "ask about cardiac rehab or whether you need testing before you start."
+            ),
+            "Expert": (
+                "Regular physical activity improves functional capacity, vascular function, and risk-factor control in CAD. "
+                "Cardiac rehab is strongly supported for eligible patients after events/procedures and improves outcomes."
+            ),
+        },
+        "security_rules": [
+            "Stop exercise and seek urgent care if you develop chest pain/pressure, severe shortness of breath, fainting, or new neurologic symptoms.",
+            "If you have nitroglycerin prescribed, follow your clinician’s instructions and call 911 if symptoms do not resolve promptly."
+        ],
+        "action_plans": [
+            "Start with 5–10 minutes of walking, 5 days/week; add 1–2 minutes every few sessions as tolerated.",
+            "Ask your clinician about a cardiac rehab referral (clinic-based or home-based options).",
+            "Use a simple exertion scale (easy/moderate/hard) and aim for ‘moderate’ most days."
+        ],
+        "sources": [
+            {"name": "AHA — Fitness and exercise", "url": "https://www.heart.org/en/healthy-living/fitness"},
+            {"name": "AHA — Cardiac rehabilitation", "url": "https://www.heart.org/en/health-topics/cardiac-rehab"},
+        ],
+    },
+       
+    {
+        "question": "What are my chances of having another heart event?",
+        "keywords": ["cad", "another heart attack", "risk", "recurrence", "secondary prevention", "statin"],
+        "signatures": {
+            "behavioral_core": "PC",
+            "condition_modifiers": {"CAD": 1},
+            "engagement_drivers": {"GO": 1, "TR": 1, "PR": 1},
+            "signature_tags": ["CAD", "SecondaryPrevention", "Risk", "L8", "PREVENT"],
+        },
+        "responses": {
+            "Listener": (
+                "It’s totally normal to feel anxious about recurrence. If you want, we can focus on what you can control and "
+                "build a plan that lowers your risk step by step."
+            ),
+            "Motivator": (
+                "Every day you take action, you lower your risk. Your efforts matter—even small changes add up."
+            ),
+            "Director": (
+                "Your risk depends on your heart function, symptoms, blood pressure, cholesterol, diabetes status, smoking, and lifestyle. "
+                "Ask your care team for your targets and a checklist to track progress."
+            ),
+            "Expert": (
+                "Secondary prevention is the evidence-based approach: optimize LDL lowering, BP control, diabetes management if present, "
+                "tobacco cessation, physical activity, and adherence to guideline-directed therapy."
+            ),
+        },
+        "security_rules": [
+            "If you develop new/worsening chest pain, shortness of breath, fainting, or symptoms of a heart attack, call 911."
+        ],
+        "action_plans": [
+            "Ask: ‘What are my target LDL and BP goals, and what’s my plan to reach them?’",
+            "Use MyLifeCheck (Life’s Essential 8) as a monthly scorecard and track improvement over time.",
+            "Bring your medication list to visits and confirm you’re on appropriate secondary prevention therapy."
+        ],
+        "sources": [
+            {"name": "AHA — Coronary artery disease", "url": "https://www.heart.org/en/health-topics/consumer-healthcare/what-is-cardiovascular-disease/coronary-artery-disease"},
+            {"name": "AHA — Life’s Essential 8 / My Life Check", "url": "https://www.heart.org/en/healthy-living/healthy-lifestyle/lifes-essential-8"},
+        ],
+    },
+        
+    {
+        "question": "How do I manage stress without hurting my heart?",
+        "keywords": ["cad", "stress", "anxiety", "mindfulness", "sleep", "relaxation"],
+        "signatures": {
+            "behavioral_core": "ST",
+            "condition_modifiers": {"CAD": 1},
+            "engagement_drivers": {"SE": 1, "HL": 1, "TR": 0},
+            "signature_tags": ["CAD", "Stress", "Sleep", "MindBody"],
+        },
+        "responses": {
+            "Listener": (
+                "Heart issues can feel overwhelming. You’re not alone. We can start by identifying what stresses you most and one small step "
+                "that makes your days feel more manageable."
+            ),
+            "Motivator": (
+                "Stress can shrink when you take control. A few minutes of calming practice daily can build momentum fast."
+            ),
+            "Director": (
+                "Pick one technique: 5 minutes of slow breathing, a short walk, journaling, or a tech-free wind-down before bed. "
+                "Schedule it like an appointment."
+            ),
+            "Expert": (
+                "Stress affects the body and can influence blood pressure, sleep, and health behaviors. The AHA recommends practical stress-management strategies; "
+                "consistent routines and social support are protective."
+            ),
+        },
+        "security_rules": [
+            "If stress is causing panic symptoms, chest pain, or thoughts of self-harm, seek urgent help (911/988 in the U.S.)."
+        ],
+        "action_plans": [
+            "Try a 5-minute breathing session daily for 7 days; track how you feel before/after.",
+            "Build a 15-minute tech-free wind-down routine to support sleep quality.",
+            "Ask your clinician about counseling, cardiac support groups, or behavior coaching if stress feels unmanageable."
+        ],
+        "sources": [
+            {"name": "AHA — Stress Management", "url": "https://www.heart.org/en/healthy-living/healthy-lifestyle/stress-management"},
+            {"name": "AHA — Stress and Heart Health", "url": "https://www.heart.org/en/healthy-living/healthy-lifestyle/stress-management/stress-and-heart-health"},
+        ],
+    },
+       
+    {
+        "question": "What should I do if I have chest pain again?",
+        "keywords": ["cad", "chest pain", "angina", "911", "nitroglycerin", "emergency"],
+        "signatures": {
+            "behavioral_core": "SY",
+            "condition_modifiers": {"CAD": 1},
+            "engagement_drivers": {"TR": 1, "PR": 1, "HL": 1},
+            "signature_tags": ["CAD", "Angina", "Emergency", "Safety"],
+        },
+        "responses": {
+            "Listener": (
+                "Chest pain can be scary. You’re not alone in this. The most important thing is having a clear plan so you don’t have to guess in the moment."
+            ),
+            "Motivator": (
+                "Taking action right away can protect your heart. A written plan can give you confidence and help your family support you."
+            ),
+            "Director": (
+                "If chest pain lasts more than a few minutes, is severe, or comes with shortness of breath, sweating, nausea, or fainting—call 911. "
+                "If you have nitroglycerin, use it exactly as prescribed and do not delay emergency care."
+            ),
+            "Expert": (
+                "Recurrent chest pain (angina) can reflect reduced blood flow to heart muscle and needs urgent evaluation if persistent or worsening. "
+                "Rapid response reduces the risk of complications."
+            ),
+        },
+        "security_rules": [
+            "Call 911 for chest pain/pressure that is severe, persistent, or accompanied by concerning symptoms (shortness of breath, sweating, fainting, weakness).",
+            "Do not drive yourself to the ER if you suspect a heart attack."
+        ],
+        "action_plans": [
+            "Create a written ‘Chest Pain Plan’ with your clinician (when to rest, when to use nitro, when to call 911).",
+            "Keep emergency numbers saved and posted; tell family what to do.",
+            "Schedule follow-up if you have new or changing angina patterns, even if symptoms stop."
+        ],
+        "sources": [
+            {"name": "AHA — Stable angina", "url": "https://www.heart.org/en/health-topics/heart-attack/angina-chest-pain/stable-angina"},
+            {"name": "AHA — Ischemic heart disease (CAD/CHD)", "url": "https://www.heart.org/en/health-topics/heart-attack/about-heart-attacks/silent-ischemia-and-ischemic-heart-disease"},
+        ],
+    },
+      
+    {
+        "question": "Should I get a stent or surgery again?",
+        "keywords": ["cad", "stent", "bypass", "surgery", "angiogram", "revascularization"],
+        "signatures": {
+            "behavioral_core": "DS",  # decision-making / shared decisions
+            "condition_modifiers": {"CAD": 1},
+            "engagement_drivers": {"TR": 1, "DS": 1, "HL": 1},
+            "signature_tags": ["CAD", "SharedDecisionMaking", "Procedures", "Imaging"],
+        },
+        "responses": {
+            "Listener": (
+                "It’s okay to feel uncertain about procedures. If you share your biggest concerns, we can organize questions for your cardiologist so you feel heard."
+            ),
+            "Motivator": (
+                "You’ve been through this before—you know your body. Asking good questions helps you choose the path that fits your goals."
+            ),
+            "Director": (
+                "Repeat procedures depend on symptoms, stress test/imaging, and how your heart is functioning now. "
+                "Ask what the tests show and what the non-procedure options are."
+            ),
+            "Expert": (
+                "Revascularization decisions are guided by symptoms, ischemia burden, anatomy, and response to medical therapy. "
+                "Your cardiologist can explain whether the benefit is symptom relief, risk reduction, or both."
+            ),
+        },
+        "security_rules": [
+            "Seek urgent care for unstable symptoms (new/worsening chest pain at rest, fainting, severe shortness of breath)."
+        ],
+        "action_plans": [
+            "Bring your questions list: benefits, risks, alternatives, and expected recovery.",
+            "Ask to review your most recent imaging/stress testing results in plain language.",
+            "Confirm you’re optimized on guideline-based medications before deciding on repeat procedures (if appropriate)."
+        ],
+        "sources": [
+            {"name": "AHA — Coronary artery disease", "url": "https://www.heart.org/en/health-topics/consumer-healthcare/what-is-cardiovascular-disease/coronary-artery-disease"},
+        ],
+    },
+        
+    {
+        "question": "Can I travel or fly with CAD?",
+        "keywords": ["cad", "travel", "fly", "vacation", "airport", "plane", "compression socks"],
+        "signatures": {
+            "behavioral_core": "PC",
+            "condition_modifiers": {"CAD": 1},
+            "engagement_drivers": {"PR": 1, "SE": 1, "HL": 1},
+            "signature_tags": ["CAD", "Travel", "Planning", "Safety"],
+        },
+        "responses": {
+            "Listener": (
+                "Wanting to live fully is a good sign. Let’s make travel feel safer by planning around your meds, energy, and symptoms."
+            ),
+            "Motivator": (
+                "Yes—you can still enjoy life with a heart condition. Preparation turns anxiety into confidence."
+            ),
+            "Director": (
+                "If your symptoms are stable, travel is often fine. Pack medications, keep them in your carry-on, plan stretch breaks, "
+                "stay hydrated, and know where you’d go for care if needed."
+            ),
+            "Expert": (
+                "Most stable CAD patients can travel safely, but risk varies based on recent events, symptoms, and overall fitness. "
+                "Discuss timing if you’ve had a recent hospitalization or procedure."
+            ),
+        },
+        "security_rules": [
+            "Avoid travel soon after a major cardiac event/procedure unless your cardiologist explicitly clears you.",
+            "Seek emergency care for chest pain, severe shortness of breath, fainting, or stroke symptoms while traveling."
+        ],
+        "action_plans": [
+            "Ask your clinician: ‘Am I cleared for travel? Any restrictions?’",
+            "Carry a medication list + diagnoses summary; keep emergency contacts handy.",
+            "Set a plan to move every 1–2 hours during long trips."
+        ],
+        "sources": [
+            {"name": "AHA News — Heart-healthy travel hacks", "url": "https://newsroom.heart.org/local-news/heart-healthy-travel-hacks"},
+            {"name": "AHA Support Network — Traveling and flying", "url": "https://www.supportnetwork.heart.org/s/question/0D5Hr00006fwkGaKAI/traveling-and-flying"},
+        ],
+    },
+       
+    {
+        "question": "What’s the role of cholesterol and statins?",
+        "keywords": ["cad", "cholesterol", "statins", "ldl", "medication", "side effects"],
+        "signatures": {
+            "behavioral_core": "MA",
+            "condition_modifiers": {"CAD": 1},
+            "engagement_drivers": {"TR": 1, "DS": 1, "HL": 1},
+            "signature_tags": ["CAD", "Cholesterol", "Statins", "MedicationAdherence"],
+        },
+        "responses": {
+            "Listener": (
+                "Many people wonder about statins and side effects. If you tell me what you’ve heard or what worries you, "
+                "we can sort it out and build questions for your clinician."
+            ),
+            "Motivator": (
+                "Lowering cholesterol protects your arteries—keep going. Each refill and each dose is an investment in fewer future scares."
+            ),
+            "Director": (
+                "Statins help lower LDL and stabilize plaque. Take them consistently. Ask your clinician what your LDL goal is and "
+                "when you should recheck labs (often every 3–12 months depending on your situation)."
+            ),
+            "Expert": (
+                "In CAD, LDL-lowering therapy is central to secondary prevention. Statins reduce events by lowering LDL and stabilizing plaques; "
+                "non-statin options may be added if goals aren’t met or if side effects limit dosing."
+            ),
+        },
+        "security_rules": [
+            "Do not stop cholesterol medication without discussing it with your prescribing clinician.",
+            "Report severe muscle pain/weakness, dark urine, or signs of allergic reaction promptly."
+        ],
+        "action_plans": [
+            "Ask: ‘What is my LDL goal and what is my current LDL?’",
+            "Recheck lipids on the schedule your clinician recommends.",
+            "If side effects occur, ask about dose adjustment, alternate dosing, or non-statin therapies."
+        ],
+        "sources": [
+            {"name": "AHA — Cholesterol-lowering medications (Answers by Heart PDF)", "url": "https://www.heart.org/-/media/Files/Health-Topics/Answers-by-Heart/Cholesterol-Lowering-Meds.pdf?rev=e3a2fa7e02654542bed939fd49397e22"},
+            {"name": "AHA — High blood cholesterol pocket guide (PDF)", "url": "https://www.heart.org/en/-/media/Files/Professional/Quality-Improvement/Check-Change-Control-Cholesterol/AHA20PrimaryPocketGuideFinal.pdf"},
+        ],
+    },
+        
+    {
+        "question": "How do I stay motivated with heart-healthy habits?",
+        "keywords": ["cad", "motivation", "habits", "goals", "accountability", "tracking"],
+        "signatures": {
+            "behavioral_core": "GO",
+            "condition_modifiers": {"CAD": 1},
+            "engagement_drivers": {"SE": 1, "GO": 1, "PR": 1},
+            "signature_tags": ["CAD", "BehaviorChange", "Goals", "Tracking", "L8"],
+        },
+        "responses": {
+            "Listener": (
+                "Staying motivated is hard—we all need encouragement. What’s the hardest part for you right now: getting started, "
+                "staying consistent, or bouncing back after a slip?"
+            ),
+            "Motivator": (
+                "Every small win matters. Keep moving forward. Momentum builds when you celebrate progress, not perfection."
+            ),
+            "Director": (
+                "Pick 1 SMART goal for this month. Track it daily or weekly. Share it with someone who can support you, "
+                "and schedule a quick weekly check-in."
+            ),
+            "Expert": (
+                "Long-term change is strongest with tracking, feedback loops, and support (coaching, rehab, community, care teams). "
+                "Using Life’s Essential 8 as a scorecard can help you focus on the highest-impact behaviors."
+            ),
+        },
+        "security_rules": [
+            "If you feel unwell during activity (chest pain, severe shortness of breath, fainting), stop and seek urgent care."
+        ],
+        "action_plans": [
+            "Choose one habit: walking after one meal daily, sodium reduction, medication consistency, or sleep routine.",
+            "Track your habit + one metric (BP, steps, or minutes) for 14 days.",
+            "Ask about cardiac rehab or a prevention program if you want structured support."
+        ],
+        "sources": [
+            {"name": "AHA — Life’s Essential 8", "url": "https://www.heart.org/en/healthy-living/healthy-lifestyle/lifes-essential-8"},
+            {"name": "AHA — Cardiac rehabilitation", "url": "https://www.heart.org/en/health-topics/cardiac-rehab"},
+        ],
+    },
+  
+    ],
+
+    },
 }
 
 
