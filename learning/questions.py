@@ -766,49 +766,6 @@ PACKS: Dict[str, Dict[str, Any]] = {
             },
         ],
     },
-    # -------------------------
-    # CAD PACK (10) - Coronary artery disease
-    # -------------------------
-    "CAD": {
-    "category": "CAD",
-    "source_defaults": [
-        {
-            "name": "American Heart Association",
-            "label": "AHA",
-            "url": "https://www.heart.org/en/health-topics/heart-attack",
-        }
-    ],
-    "questions": [
-        {
-            "title": "What caused my coronary artery disease?",
-            "question": "What caused my coronary artery disease?",
-            "keywords": ["cad", "coronary", "atherosclerosis", "risk factors"],
-            "responses": {
-                "Listener": "It’s natural to wonder ‘why me?’ Many people ask this.",
-                "Motivator": "Knowing your history can help you rewrite your future.",
-                "Director": "CAD often results from a mix of cholesterol, high blood pressure, diabetes, smoking, and genes.",
-                "Expert": "AHA science shows that atherosclerosis can build silently over decades.",
-            },
-            "signatures": {
-                "behavioral_core": ["HL"],  # Health Literacy (example tag)
-                "condition_modifiers": ["CAD"],
-                "engagement_drivers": {"TR": 1, "HL": 1, "SE": 0},  # -1/0/+1
-            },
-            "security_rules": [
-                "Seek emergency care for chest pain/pressure, shortness of breath, fainting, or stroke symptoms."
-            ],
-            "action_plans": [
-                "Ask your provider to review your personal CAD risk factors and your last lipid panel.",
-                "Pick one risk factor to target this month (LDL, BP, tobacco, activity, nutrition)."
-            ],
-            # optional; if omitted, source_defaults is used
-            # "sources": [...]
-        },
-
-        # Add the other 9 questions here...
-    ],
-},
-
 }
 
 
