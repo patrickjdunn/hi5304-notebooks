@@ -53,6 +53,92 @@ No local installation is required.
 
 ---
 
+---
+
+## 🚀 Start Here
+
+Welcome to the Data Science Coding Laboratory.
+
+This repository contains structured lessons, instructional videos, and hands-on notebooks in Data Science, Python, R, SQL, and Scholarly Writing.
+
+### Step 1: Explore the Core Foundations
+Begin with the Data Science fundamentals:
+
+- 👉 [Data Science Module](lessons/DataScience/)
+
+Focus on:
+- Research questions
+- Sampling and populations
+- Distributions and rates
+- Linearity and power
+- Data management concepts
+
+---
+
+### Step 2: Learn a Programming Track
+
+Choose a primary track (or complete both):
+
+- 🐍 [Python Track](lessons/Python/)
+- 📊 [R Track](lessons/R/)
+
+Each track includes:
+- Software basics
+- Statistical testing
+- Applied examples
+- Calculated variables
+
+---
+
+### Step 3: Work with Data Systems
+
+- 🗄 [SQL Module](lessons/SQL/)
+
+Learn:
+- Database structure
+- Keys and joins
+- Insert statements
+- Query logic
+
+---
+
+### Step 4: Strengthen Scholarly Communication
+
+- ✍️ [Scholarly Writing Module](lessons/Writing/)
+
+Topics include:
+- Ethical considerations
+- MEAL plan structure
+- Concept papers
+- Grant and manuscript writing
+- Active voice and clarity
+
+---
+
+## 💡 How to Use This Repository
+
+- Browse videos inside each module folder.
+- Open Jupyter notebooks for hands-on practice.
+- Fork the repository if you want your own working copy.
+- Use GitHub Codespaces to run everything in your browser.
+
+---
+
+## 🎥 Instructional Videos
+
+Instructional videos are organized by module inside the **lessons/** folder.
+
+### Core Modules
+
+- [Data Science](lessons/DataScience/)
+- [Python](lessons/Python/)
+- [R](lessons/R/)
+- [SQL](lessons/SQL/)
+- [Scholarly Writing](lessons/Writing/)
+
+Click a module to view all associated videos.
+
+
 ## Using Python and R in Jupyter Notebooks
 
 This environment supports **both Python and R kernels**.
@@ -128,7 +214,7 @@ data_science
 \q           -- quit psql
 ```
 
----
+
 
 ## Environment Sanity Check (Recommended)
 
