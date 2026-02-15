@@ -72,7 +72,24 @@ medication_list = [
     {"name": "Crestor", "dose": "10 mg daily"}
 
 ]
-#CarePlan
+
+# Engagement Drivers
+
+proactiveness = 0 # -1 = reactive, 1 = proactive
+selfefficacy = 0 # -1 = not confident, 1 = confident
+readiness_for_change = 0 # -1 = not ready, 1 = ready
+independence = 0 # -1 = rely on others, 1 = independent
+goal_orientation = 0 # -1 = no plan, 1 = has a plan
+decision_style = 0 # -1 = avoids, 1 = explores options
+health_literacy = 0 # -1 = poor, 1 = adequate
+trust = 0 # -1 =low, 1 = moderate to high
+food_insecurity = 0 # -1 = insecure, 1 = secure
+access_to_healtcare = 0 # -1 = hard, 1 = easy
+
+signatures_score = proactiveness + selfefficacy + readiness_for_change + independence + goal_orientation + decision_style + health_literacy + trust + food_insecurity + access_to_healtcare
+
+
+# CarePlan
 SMART_Goal = 0 #0 = set, 1 = not set
 symptoms = 0 # 1 if having symptoms or 0 if no symptoms are present
 medication_adherence = 1 # 0 = All the time,1 = inconsistently,2 = I am not taking my medication as prescribed
@@ -2313,6 +2330,10 @@ print("\n=== CarePlan Score ===")
 print(f"Follow-up Recommendation: {follow_up}")
 if cp_message:
     print(cp_message)
+
+print("\n--- Engagement Driver Score ---")
+print(f"Total Signatures Score: {signatures_score}")
+
 
 # ------------------------
 # Chads2Vasc
