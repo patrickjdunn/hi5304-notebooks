@@ -793,7 +793,7 @@ def render_scoring_hooks():
         calc = {**calc, **CALC_CONTEXT}
 
     # ✅ PLACE DEBUG RIGHT HERE
-   
+       
     print(
         "\n[DEBUG] calc keys include:",
         [k for k in calc.keys()
@@ -802,6 +802,7 @@ def render_scoring_hooks():
          or "cardio" in str(k)
          or "CVH" in str(k)]
     )
+    print("[DEBUG] calc has", len(calc), "keys. First 30:", list(calc.keys())[:30])
 
     mylife, prevent = extract_mylifecheck_prevent(calc)
 
