@@ -29,6 +29,8 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+CALC_CONTEXT: Dict[str, Any] = {}
+
 # -----------------------------
 # Imports from questions.py
 # -----------------------------
@@ -339,75 +341,69 @@ def try_get_calculator_results() -> Dict[str, Any]:
 
 
 def extract_mylifecheck_prevent(calc: Dict[str, Any]) -> Tuple[Optional[Any], Optional[Any]]:
-    """
-    Best-effort extraction from calculator output dict.
-    Supports either nested structures or flat context keys.
-    Also unwraps common wrapper keys so MLC_score is visible.
-    """
     if not calc:
         return None, None
-
-    # -------------------------
-    # 0) Unwrap common wrappers
-    # -------------------------
-    for wrapper_key in (
-        "calculator_context",
-        "calc_context",
-        "context",
-        "results",
-        "calculator_results",
-        "combined_calculator_results",
-        "Calculator Context (for Signatures)",
-    ):
-        if isinstance(calc, dict) and wrapper_key in calc and isinstance(calc[wrapper_key], dict):
-            calc = calc[wrapper_key]
 
     mylife = None
     prevent = None
 
-    # -------------------------
-    # 1) Try nested MyLifeCheck / LE8 structures
-    # -------------------------
+    # -----------------------------
+    # MyLifeCheck / Life's Essential 8 (nested)
+    # -----------------------------
     for k in ("mylifecheck", "my_life_check", "life_essential_8", "le8", "lifes_essential_8"):
-        if k in calc and calc.get(k) is not None:
+        if calc.get(k) is not None:
             mylife = calc.get(k)
             break
 
-    # -------------------------
-    # 2) Fallback: build MyLifeCheck block from FLAT keys
-    # -------------------------
+    # -----------------------------
+    # MyLifeCheck flat fallback
+    # -----------------------------
     if mylife is None:
-        mlc_score = calc.get("MLC_score", calc.get("mlc_score"))
-        cvh_status = calc.get("cardiovascular_health_status", calc.get("cvh_status", calc.get("CVH_status")))
-        le8_summary = calc.get("le8_summary", calc.get("life_essential_8_summary"))
-        le8_components = calc.get("le8_components", calc.get("life_essential_8_components"))
+        mlc = None
+        for k in ("MLC_score", "mlc_score", "mylifecheck_score", "my_life_check_score"):
+            if calc.get(k) is not None:
+                mlc = calc.get(k)
+                break
 
-        if mlc_score is not None or cvh_status is not None or le8_summary is not None or le8_components is not None:
+        cvh = None
+        for k in ("cardiovascular_health_status", "cvh_status", "CVH_status"):
+            if calc.get(k) is not None:
+                cvh = calc.get(k)
+                break
+
+        assessments: Dict[str, Any] = {}
+        for k, v in calc.items():
+            if v is None:
+                continue
+            ks = str(k).lower()
+            if ks.endswith("_assessment"):
+                assessments[str(k)] = v
+
+        if mlc is not None or cvh is not None or assessments:
             mylife = {}
-            if mlc_score is not None:
-                mylife["MLC_score"] = mlc_score
-            if cvh_status is not None:
-                mylife["CVH_status"] = cvh_status
-            if le8_summary is not None:
-                mylife["LE8_summary"] = le8_summary
-            if le8_components is not None:
-                mylife["LE8_components"] = le8_components
+            if mlc is not None:
+                mylife["MLC_score"] = mlc
+            if cvh is not None:
+                mylife["CVH_status"] = cvh
+            for k, v in assessments.items():
+                mylife[k] = v
 
-            if "metabolic_syndrome_score" in calc:
-                mylife["metabolic_syndrome_score"] = calc.get("metabolic_syndrome_score")
-            if "ckm_stage" in calc:
-                mylife["ckm_stage"] = calc.get("ckm_stage")
-
-    # -------------------------
-    # 3) PREVENT extraction
-    # -------------------------
+    # -----------------------------
+    # PREVENT (nested)
+    # -----------------------------
     for k in ("prevent", "prevent_risk", "prevent_score", "prevent_results"):
-        if k in calc and calc.get(k) is not None:
+        if calc.get(k) is not None:
             prevent = calc.get(k)
             break
 
-    if prevent is None and "PREVENT" in calc and calc.get("PREVENT") is not None:
-        prevent = {"last_risk_score": calc.get("PREVENT")}
+    # -----------------------------
+    # PREVENT flat fallback
+    # -----------------------------
+    if prevent is None:
+        for k in ("last_risk_score", "risk_score", "PREVENT"):
+            if calc.get(k) is not None:
+                prevent = {"last_risk_score": calc.get(k)}
+                break
 
     return mylife, prevent
 
@@ -791,12 +787,25 @@ def render_scoring_hooks():
         return
 
     calc = try_get_calculator_results()
-    if not calc:
-        print("No calculator results found yet.")
-        print("Tip: run combined_calculator.py first (or expose get_results()/RESULTS in that module).")
-        return
+
+    # Merge in local context (wins if keys overlap)
+    if isinstance(CALC_CONTEXT, dict) and CALC_CONTEXT:
+        calc = {**calc, **CALC_CONTEXT}
+
+    # ✅ PLACE DEBUG RIGHT HERE
+   
+    print(
+        "\n[DEBUG] calc keys include:",
+        [k for k in calc.keys()
+         if "MLC" in str(k)
+         or "assessment" in str(k)
+         or "cardio" in str(k)
+         or "CVH" in str(k)]
+    )
 
     mylife, prevent = extract_mylifecheck_prevent(calc)
+
+
 
     # ---------------------
     # MyLifeCheck
