@@ -339,45 +339,59 @@ def try_get_calculator_results() -> Dict[str, Any]:
 
     return {}
 
+from typing import Any, Dict, Optional, Tuple
 
 def extract_mylifecheck_prevent(calc: Dict[str, Any]) -> Tuple[Optional[Any], Optional[Any]]:
-    if not calc:
+    """
+    Best-effort extraction from calculator output dict.
+
+    Expected current structure (based on your debug):
+      calc = {
+        "condition_modifiers": {...},
+        "inputs": {...},
+        "engagement_drivers": {...},
+        "scores": {...},     # <-- MyLifeCheck / LE8 likely here
+        "prevent": {...},    # <-- PREVENT likely here
+      }
+    """
+    if not isinstance(calc, dict) or not calc:
         return None, None
 
-    mylife = None
-    prevent = None
+    scores = calc.get("scores") if isinstance(calc.get("scores"), dict) else {}
+    prevent_block = calc.get("prevent") if isinstance(calc.get("prevent"), dict) else {}
 
     # -----------------------------
-    # MyLifeCheck / Life's Essential 8 (nested)
+    # MyLifeCheck / Life's Essential 8
     # -----------------------------
+    mylife = None
+
+    # 1) Nested blocks inside scores (preferred)
     for k in ("mylifecheck", "my_life_check", "life_essential_8", "le8", "lifes_essential_8"):
-        if calc.get(k) is not None:
-            mylife = calc.get(k)
+        if k in scores and scores.get(k) is not None:
+            mylife = scores.get(k)
             break
 
-    # -----------------------------
-    # MyLifeCheck flat fallback
-    # -----------------------------
+    # 2) Flat-ish fields inside scores (what your project likely uses)
     if mylife is None:
         mlc = None
         for k in ("MLC_score", "mlc_score", "mylifecheck_score", "my_life_check_score"):
-            if calc.get(k) is not None:
-                mlc = calc.get(k)
+            if k in scores and scores.get(k) is not None:
+                mlc = scores.get(k)
                 break
 
         cvh = None
         for k in ("cardiovascular_health_status", "cvh_status", "CVH_status"):
-            if calc.get(k) is not None:
-                cvh = calc.get(k)
+            if k in scores and scores.get(k) is not None:
+                cvh = scores.get(k)
                 break
 
         assessments: Dict[str, Any] = {}
-        for k, v in calc.items():
+        for k, v in scores.items():
             if v is None:
                 continue
-            ks = str(k).lower()
-            if ks.endswith("_assessment"):
-                assessments[str(k)] = v
+            ks = str(k)
+            if ks.lower().endswith("_assessment"):
+                assessments[ks] = v
 
         if mlc is not None or cvh is not None or assessments:
             mylife = {}
@@ -385,23 +399,30 @@ def extract_mylifecheck_prevent(calc: Dict[str, Any]) -> Tuple[Optional[Any], Op
                 mylife["MLC_score"] = mlc
             if cvh is not None:
                 mylife["CVH_status"] = cvh
-            for k, v in assessments.items():
-                mylife[k] = v
+            mylife.update(assessments)
+
+    # 3) Legacy fallback (top-level keys)
+    if mylife is None:
+        mlc = None
+        for k in ("MLC_score", "mlc_score"):
+            if k in calc and calc.get(k) is not None:
+                mlc = calc.get(k)
+                break
+        if mlc is not None:
+            mylife = {"MLC_score": mlc}
 
     # -----------------------------
-    # PREVENT (nested)
+    # PREVENT
     # -----------------------------
-    for k in ("prevent", "prevent_risk", "prevent_score", "prevent_results"):
-        if calc.get(k) is not None:
-            prevent = calc.get(k)
-            break
+    prevent = None
 
-    # -----------------------------
-    # PREVENT flat fallback
-    # -----------------------------
-    if prevent is None:
+    # 1) Use nested prevent dict if present
+    if prevent_block:
+        prevent = prevent_block
+    else:
+        # 2) Legacy fallback: flat keys
         for k in ("last_risk_score", "risk_score", "PREVENT"):
-            if calc.get(k) is not None:
+            if k in calc and calc.get(k) is not None:
                 prevent = {"last_risk_score": calc.get(k)}
                 break
 
@@ -804,6 +825,18 @@ def render_scoring_hooks():
     )
     print("[DEBUG] calc has", len(calc), "keys. First 30:", list(calc.keys())[:30])
 
+    calc = try_get_calculator_results()
+
+# Merge in local context (wins if keys overlap)
+    if isinstance(CALC_CONTEXT, dict) and CALC_CONTEXT:
+        calc = {**calc, **CALC_CONTEXT}
+
+    print("\n[DEBUG] calc has", len(calc), "keys. First 30:", list(calc.keys())[:30])
+    if isinstance(calc.get("scores"), dict):
+        print("[DEBUG] scores keys:", list(calc["scores"].keys())[:50])
+    if isinstance(calc.get("prevent"), dict):
+        print("[DEBUG] prevent keys:", list(calc["prevent"].keys())[:50])
+
     mylife, prevent = extract_mylifecheck_prevent(calc)
 
 
@@ -816,10 +849,15 @@ def render_scoring_hooks():
         mlc = float(mylife["MLC_score"])
         tier = _mlc_tier(mlc)
         tier_suffix = f" ({tier})" if tier else ""
-        print(f"- MLC_score: {mlc:.2f}{tier_suffix}")
+        #print(f"- MLC_score: {mlc:.2f}{tier_suffix}")
+        
         # print remaining keys (if any)
+        #rest = {k: v for k, v in mylife.items() if k != "MLC_score"}
+        #_bullet_list(_pretty_calc_block(rest))
         rest = {k: v for k, v in mylife.items() if k != "MLC_score"}
+    if rest:
         _bullet_list(_pretty_calc_block(rest))
+
     else:
         _bullet_list(_pretty_calc_block(mylife))
 
