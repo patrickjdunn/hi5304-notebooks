@@ -67,7 +67,7 @@ except Exception:
 
 
 # -----------------------------
-# Combined_calculator import
+# Optional combined_calculator import
 # -----------------------------
 CALCULATOR_AVAILABLE = False
 calculator = None
@@ -341,26 +341,132 @@ def try_get_calculator_results() -> Dict[str, Any]:
 def extract_mylifecheck_prevent(calc: Dict[str, Any]) -> Tuple[Optional[Any], Optional[Any]]:
     """
     Best-effort extraction from calculator output dict.
+    Supports either nested structures or flat context keys.
+    Also unwraps common wrapper keys so MLC_score is visible.
     """
     if not calc:
         return None, None
 
+    # -------------------------
+    # 0) Unwrap common wrappers
+    # -------------------------
+    for wrapper_key in (
+        "calculator_context",
+        "calc_context",
+        "context",
+        "results",
+        "calculator_results",
+        "combined_calculator_results",
+        "Calculator Context (for Signatures)",
+    ):
+        if isinstance(calc, dict) and wrapper_key in calc and isinstance(calc[wrapper_key], dict):
+            calc = calc[wrapper_key]
+
     mylife = None
     prevent = None
 
-    # MyLifeCheck keys (guessable)
+    # -------------------------
+    # 1) Try nested MyLifeCheck / LE8 structures
+    # -------------------------
     for k in ("mylifecheck", "my_life_check", "life_essential_8", "le8", "lifes_essential_8"):
-        if k in calc:
+        if k in calc and calc.get(k) is not None:
             mylife = calc.get(k)
             break
 
-    # PREVENT keys
+    # -------------------------
+    # 2) Fallback: build MyLifeCheck block from FLAT keys
+    # -------------------------
+    if mylife is None:
+        mlc_score = calc.get("MLC_score", calc.get("mlc_score"))
+        cvh_status = calc.get("cardiovascular_health_status", calc.get("cvh_status", calc.get("CVH_status")))
+        le8_summary = calc.get("le8_summary", calc.get("life_essential_8_summary"))
+        le8_components = calc.get("le8_components", calc.get("life_essential_8_components"))
+
+        if mlc_score is not None or cvh_status is not None or le8_summary is not None or le8_components is not None:
+            mylife = {}
+            if mlc_score is not None:
+                mylife["MLC_score"] = mlc_score
+            if cvh_status is not None:
+                mylife["CVH_status"] = cvh_status
+            if le8_summary is not None:
+                mylife["LE8_summary"] = le8_summary
+            if le8_components is not None:
+                mylife["LE8_components"] = le8_components
+
+            if "metabolic_syndrome_score" in calc:
+                mylife["metabolic_syndrome_score"] = calc.get("metabolic_syndrome_score")
+            if "ckm_stage" in calc:
+                mylife["ckm_stage"] = calc.get("ckm_stage")
+
+    # -------------------------
+    # 3) PREVENT extraction
+    # -------------------------
     for k in ("prevent", "prevent_risk", "prevent_score", "prevent_results"):
-        if k in calc:
+        if k in calc and calc.get(k) is not None:
             prevent = calc.get(k)
             break
 
+    if prevent is None and "PREVENT" in calc and calc.get("PREVENT") is not None:
+        prevent = {"last_risk_score": calc.get("PREVENT")}
+
     return mylife, prevent
+
+
+def _format_percent(value: Any, decimals: int = 2) -> str:
+    """Format a 0–1 probability (or 0–100 percent) into a percent string."""
+    try:
+        x = float(value)
+    except Exception:
+        return _safe_strip(value)
+
+    pct = x if x > 1.0 else x * 100.0
+    return f"{pct:.{decimals}f}%"
+
+
+def _mlc_tier(mlc_score: Any) -> str:
+    """Lightweight CVH tier label for readability."""
+    try:
+        s = float(mlc_score)
+    except Exception:
+        return ""
+    if s >= 80:
+        return "High CVH"
+    if s >= 50:
+        return "Moderate CVH"
+    return "Low CVH"
+
+
+def _prevent_tier(risk_value: Any, horizon: str = "10yr") -> str:
+    """Heuristic risk tier labels (for interpretation; not a diagnosis).
+
+    10-year tiers align with commonly used ASCVD-style groupings:
+      <5% Low, 5–<7.5% Borderline, 7.5–<20% Intermediate, >=20% High
+
+    30-year tiers are broader pragmatic buckets for readability.
+    """
+    try:
+        x = float(risk_value)
+    except Exception:
+        return ""
+
+    pct = x if x > 1.0 else x * 100.0
+
+    if horizon.lower().startswith("30"):
+        if pct < 20:
+            return "Low"
+        if pct < 30:
+            return "Moderate"
+        if pct < 40:
+            return "High"
+        return "Very High"
+
+    if pct < 5:
+        return "Low"
+    if pct < 7.5:
+        return "Borderline"
+    if pct < 20:
+        return "Intermediate"
+    return "High"
 
 
 def _pretty_calc_block(obj: Any) -> List[str]:
@@ -692,43 +798,49 @@ def render_scoring_hooks():
 
     mylife, prevent = extract_mylifecheck_prevent(calc)
 
-def _mlc_tier(mlc_score: float | None) -> str | None:
-    if mlc_score is None:
-        return None
-    # Simple, readable tiers
-    if mlc_score >= 80:
-        return "High CVH"
-    if mlc_score >= 50:
-        return "Moderate CVH"
-    return "Low CVH"
-
-
-def _prevent_tier_10yr(risk_score: float | None) -> str | None:
-    """
-    risk_score is expected as a fraction (e.g., 0.061 = 6.1%).
-    Tiers modeled after common 10-year ASCVD-style cut points.
-    """
-    if risk_score is None:
-        return None
-    pct = risk_score * 100.0
-    if pct < 5:
-        return "Low"
-    if pct < 7.5:
-        return "Borderline"
-    if pct < 20:
-        return "Intermediate"
-    return "High"
-
-
-
-
+    # ---------------------
+    # MyLifeCheck
+    # ---------------------
     print("\nMyLifeCheck / Life's Essential 8:")
-    mylife_lines = _pretty_calc_block(mylife)
-    _bullet_list(mylife_lines)
+    if isinstance(mylife, dict) and isinstance(mylife.get("MLC_score"), (int, float)):
+        mlc = float(mylife["MLC_score"])
+        tier = _mlc_tier(mlc)
+        tier_suffix = f" ({tier})" if tier else ""
+        print(f"- MLC_score: {mlc:.2f}{tier_suffix}")
+        # print remaining keys (if any)
+        rest = {k: v for k, v in mylife.items() if k != "MLC_score"}
+        _bullet_list(_pretty_calc_block(rest))
+    else:
+        _bullet_list(_pretty_calc_block(mylife))
 
+    # ---------------------
+    # PREVENT
+    # ---------------------
     print("\nPREVENT Risk:")
-    prevent_lines = _pretty_calc_block(prevent)
-    _bullet_list(prevent_lines)
+    if isinstance(prevent, dict) and prevent:
+        items = list(prevent.items())
+
+        def _sort_key(item: Tuple[str, Any]) -> Tuple[int, str]:
+            k = str(item[0]).lower()
+            if "10" in k and "yr" in k:
+                return (0, k)
+            if "30" in k and "yr" in k:
+                return (1, k)
+            if "risk_score" in k:
+                return (2, k)
+            return (3, k)
+
+        for k, v in sorted(items, key=_sort_key):
+            k_l = str(k).lower()
+            horizon = "30yr" if ("30" in k_l and "yr" in k_l) else "10yr"
+            if isinstance(v, (int, float)):
+                tier = _prevent_tier(v, horizon=horizon)
+                tier_suffix = f" ({tier})" if tier else ""
+                print(f"- {k}: {_format_percent(v, 2)}{tier_suffix}")
+            else:
+                print(f"- {k}: {_safe_strip(v)}")
+    else:
+        _bullet_list(_pretty_calc_block(prevent))
 
 
 # -----------------------------
@@ -779,15 +891,4 @@ if __name__ == "__main__":
     main()
 
 
-def get_context_from_calculator() -> Dict[str, Any]:
-    calc = try_get_calculator_results()
-    if not calc:
-        return {}
-    
-    return calc
 
-
-ctx = get_context_from_calculator()
-if ctx:
-    _title("Calculator Context (for Signatures)")
-    _bullet_list(_pretty_calc_block(ctx.get("scores")))
