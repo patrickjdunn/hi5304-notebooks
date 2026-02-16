@@ -2453,3 +2453,58 @@ print("\n=== Healthy Day at Home ===")
 #print(f"Healthy Day Score: {score}")
 print(f"Message: {note}")
 
+# ------------------------
+# Expose results for signatures_engine.py
+# ------------------------
+
+RESULTS = {
+    "condition_modifiers": {
+        "CAD": coronary_artery_disease,
+        "AF": atrial_fibrillation,
+        "HF": heart_failure,
+        "CKMH": ckmh,
+        "ST": stroke_or_tia,
+    },
+    "inputs": {
+        "total_cholesterol": total_cholesterol,
+        "HDL_cholesterol": HDL_cholesterol,
+        "LDL_cholesterol": LDL_cholesterol,
+        "systolic_blood_pressure": systolic_blood_pressure,
+        "diastolic_blood_pressure": diastolic_blood_pressure,
+        "fasting_blood_sugar": fasting_blood_sugar,
+        "A1c": A1c,
+        "BMI": BMI,
+        "tobacco_use": tobacco_use,
+        "sleep_hours": sleep_hours,
+        "moderate_intensity": moderate_intensity,
+        "vigorous_intensity": vigorous_intensity,
+    },
+    "engagement_drivers": {
+        "proactiveness": proactiveness,
+        "selfefficacy": selfefficacy,
+        "readiness_for_change": readiness_for_change,
+        "independence": independence,
+        "goal_orientation": goal_orientation,
+        "decision_style": decision_style,
+        "health_literacy": health_literacy,
+        "trust": trust,
+        "food_insecurity": food_insecurity,
+        "access_to_healthcare": access_to_healtcare,
+    },
+    "scores": {
+        "signatures_score": signatures_score,
+        "sdi": sdi,
+        "MLC_score": MLC_score,
+        "metabolic_syndrome_score": met_score,
+        "ckm_stage": ckm_stage,
+        "chads2vasc_score": chads2vasc_score,
+    },
+    # Optional: add PREVENT summary in a structured way
+    # If you keep only the last computed risk_score variable, include that:
+    "prevent": {
+        "last_risk_score": risk_score if "risk_score" in globals() else None
+    },
+}
+
+def get_results():
+    return RESULTS
