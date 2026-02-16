@@ -2495,6 +2495,7 @@ RESULTS = {
         "signatures_score": signatures_score,
         "sdi": sdi,
         "MLC_score": MLC_score,
+        "PREVENT": risk_score,
         "metabolic_syndrome_score": met_score,
         "ckm_stage": ckm_stage,
         "chads2vasc_score": chads2vasc_score,

@@ -67,7 +67,7 @@ except Exception:
 
 
 # -----------------------------
-# Optional combined_calculator import
+# Combined_calculator import
 # -----------------------------
 CALCULATOR_AVAILABLE = False
 calculator = None
@@ -749,5 +749,15 @@ if __name__ == "__main__":
     main()
 
 
+def get_context_from_calculator() -> Dict[str, Any]:
+    calc = try_get_calculator_results()
+    if not calc:
+        return {}
+    
+    return calc
 
 
+ctx = get_context_from_calculator()
+if ctx:
+    _title("Calculator Context (for Signatures)")
+    _bullet_list(_pretty_calc_block(ctx.get("scores")))
