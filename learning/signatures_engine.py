@@ -692,6 +692,36 @@ def render_scoring_hooks():
 
     mylife, prevent = extract_mylifecheck_prevent(calc)
 
+def _mlc_tier(mlc_score: float | None) -> str | None:
+    if mlc_score is None:
+        return None
+    # Simple, readable tiers
+    if mlc_score >= 80:
+        return "High CVH"
+    if mlc_score >= 50:
+        return "Moderate CVH"
+    return "Low CVH"
+
+
+def _prevent_tier_10yr(risk_score: float | None) -> str | None:
+    """
+    risk_score is expected as a fraction (e.g., 0.061 = 6.1%).
+    Tiers modeled after common 10-year ASCVD-style cut points.
+    """
+    if risk_score is None:
+        return None
+    pct = risk_score * 100.0
+    if pct < 5:
+        return "Low"
+    if pct < 7.5:
+        return "Borderline"
+    if pct < 20:
+        return "Intermediate"
+    return "High"
+
+
+
+
     print("\nMyLifeCheck / Life's Essential 8:")
     mylife_lines = _pretty_calc_block(mylife)
     _bullet_list(mylife_lines)
