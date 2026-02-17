@@ -1959,6 +1959,8 @@ intercept_constants = {
     "30yr_ascvd_female": -2.314066, "30yr_ascvd_male": -1.985368,
     "30yr_hf_female": -2.642208, "30yr_hf_male": -2.425439
 }
+
+
 # Function to calculate final risk score sum
 def calculate_risk_score_sum(time_horizon, condition, gender, *values):
     key = f"{time_horizon.lower()}_{condition.lower()}_{gender.lower()}"
@@ -2003,7 +2005,11 @@ component_values = (
     max_sdi_value,
 )
 
-# Loop through each combination and print the risk
+# -----------------------------
+# PREVENT (store all 6 results)
+# -----------------------------
+prevent_results = {}  # will hold: cvd_10yr, ascvd_10yr, hf_10yr, cvd_30yr, ascvd_30yr, hf_30yr
+
 print("\n=== PREVENT Summary ===")
 for time_horizon in time_horizons:
     for condition in conditions:
@@ -2012,10 +2018,22 @@ for time_horizon in time_horizons:
                 time_horizon, condition, gender, *component_values
             )
             risk_score = math.exp(risk_score_sum) / (1 + math.exp(risk_score_sum))
+
+            key = f"{condition.lower()}_{time_horizon.lower()}"  # e.g., "cvd_10yr"
+            prevent_results[key] = risk_score  # store raw probability (0-1)
+
+            # keep your printed output
             print(f"PREVENT Risk for {gender}, {condition}, {time_horizon}: {risk_score * 100:.1f}%")
         except ValueError as e:
             print(str(e))
+# Optional debug: show which 6 keys were stored
+print("[DEBUG] prevent_results keys:", sorted(prevent_results.keys()))
+# Backward-compatible single PREVENT number (pick the one you want as "primary")
+# Common choice: overall CVD 10yr; alternate: HF 30yr (what you currently were accidentally using)
+risk_score = prevent_results.get("cvd_10yr")  # <-- recommended default
+
 #print(f"PREVENT Risk Score Sum: {risk_score_sum}")
+
 
 # ------------------------
 # CKMH Staging
@@ -2464,6 +2482,10 @@ RESULTS = {
         "HF": heart_failure,
         "CKMH": ckmh,
         "ST": stroke_or_tia,
+        "DM": diabetes,
+        "CH": cholesterol_treatment,
+        "HTN": hypertension_treatment,
+        
     },
     "inputs": {
         "total_cholesterol": total_cholesterol,
@@ -2474,6 +2496,8 @@ RESULTS = {
         "fasting_blood_sugar": fasting_blood_sugar,
         "A1c": A1c,
         "BMI": BMI,
+        "uacr": uacr,
+        "egfr": egfr,
         "tobacco_use": tobacco_use,
         "sleep_hours": sleep_hours,
         "moderate_intensity": moderate_intensity,
@@ -2503,8 +2527,10 @@ RESULTS = {
     # Optional: add PREVENT summary in a structured way
     # If you keep only the last computed risk_score variable, include that:
     "prevent": {
-        "last_risk_score": risk_score if "risk_score" in globals() else None
-    },
+    **prevent_results,                 # all 6 risks
+    "last_risk_score": risk_score,     # keep older code working
+},
+
 }
 
 def get_results():
