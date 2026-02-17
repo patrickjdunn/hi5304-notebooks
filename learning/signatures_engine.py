@@ -797,8 +797,13 @@ def render_persona_response(q: PickedQuestion, persona: PersonaKey):
 # -----------------------------
 # Calculator rendering
 # -----------------------------
-def render_scoring_hooks():
+def render_scoring_hooks() -> None:
     _title("Scoring Hooks (MyLifeCheck + PREVENT)")
+
+    # Always define these so they can never be "unbound"
+    calc: Dict[str, Any] = {}
+    mylife: Optional[Any] = None
+    prevent: Optional[Any] = None
 
     if not CALCULATOR_AVAILABLE:
         print("combined_calculator.py not available.")
@@ -807,53 +812,46 @@ def render_scoring_hooks():
         print("(You can still use Signatures without scoring.)")
         return
 
-    calc = try_get_calculator_results()
+    # ---------------------
+    # Pull calculator results safely
+    # ---------------------
+    try:
+        calc = try_get_calculator_results() or {}
+        if not isinstance(calc, dict):
+            calc = {"_raw": calc}
+    except Exception as e:
+        print("⚠️ Could not load calculator results:", e)
+        calc = {}
 
     # Merge in local context (wins if keys overlap)
-    if isinstance(CALC_CONTEXT, dict) and CALC_CONTEXT:
-        calc = {**calc, **CALC_CONTEXT}
+    try:
+        if isinstance(CALC_CONTEXT, dict) and CALC_CONTEXT:
+            calc = {**calc, **CALC_CONTEXT}
+    except Exception as e:
+        print("⚠️ Could not merge CALC_CONTEXT:", e)
 
-    # ✅ PLACE DEBUG RIGHT HERE
-       
-    print(
-        "\n[DEBUG] calc keys include:",
-        [k for k in calc.keys()
-         if "MLC" in str(k)
-         or "assessment" in str(k)
-         or "cardio" in str(k)
-         or "CVH" in str(k)]
-    )
-    print("[DEBUG] calc has", len(calc), "keys. First 30:", list(calc.keys())[:30])
-
-    calc = try_get_calculator_results()
-
-# Merge in local context (wins if keys overlap)
-    if isinstance(CALC_CONTEXT, dict) and CALC_CONTEXT:
-        calc = {**calc, **CALC_CONTEXT}
-
-    print("\n[DEBUG] calc has", len(calc), "keys. First 30:", list(calc.keys())[:30])
-    if isinstance(calc.get("scores"), dict):
-        print("[DEBUG] scores keys:", list(calc["scores"].keys())[:50])
-    if isinstance(calc.get("prevent"), dict):
-        print("[DEBUG] prevent keys:", list(calc["prevent"].keys())[:50])
-
-    mylife, prevent = extract_mylifecheck_prevent(calc)
-
-
+    
+    # ---------------------
+    # Extract hooks safely
+    # ---------------------
+    try:
+        mylife, prevent = extract_mylifecheck_prevent(calc)
+    except Exception as e:
+        print("⚠️ extract_mylifecheck_prevent failed:", e)
+        mylife, prevent = None, None
 
     # ---------------------
-    # MyLifeCheck
+    # MyLifeCheck / LE8
     # ---------------------
     print("\nMyLifeCheck / Life's Essential 8:")
+
+    rest: Dict[str, Any] = {}
     if isinstance(mylife, dict) and isinstance(mylife.get("MLC_score"), (int, float)):
         mlc = float(mylife["MLC_score"])
         tier = _mlc_tier(mlc)
         tier_suffix = f" ({tier})" if tier else ""
         #print(f"- MLC_score: {mlc:.2f}{tier_suffix}")
-        
-        # print remaining keys (if any)
-        #rest = {k: v for k, v in mylife.items() if k != "MLC_score"}
-        #_bullet_list(_pretty_calc_block(rest))
+
         rest = {k: v for k, v in mylife.items() if k != "MLC_score"}
     if rest:
         _bullet_list(_pretty_calc_block(rest))
@@ -865,6 +863,7 @@ def render_scoring_hooks():
     # PREVENT
     # ---------------------
     print("\nPREVENT Risk:")
+
     if isinstance(prevent, dict) and prevent:
         items = list(prevent.items())
 
@@ -874,7 +873,7 @@ def render_scoring_hooks():
                 return (0, k)
             if "30" in k and "yr" in k:
                 return (1, k)
-            if "risk_score" in k:
+            if "risk_score" in k or "last_risk_score" in k:
                 return (2, k)
             return (3, k)
 
@@ -890,6 +889,73 @@ def render_scoring_hooks():
     else:
         _bullet_list(_pretty_calc_block(prevent))
 
+    # ---------------------
+    # Other Scores
+    # ---------------------
+    print("\nOther Scores:")
+
+    other: Dict[str, Any] = {}
+
+    # Most of your outputs are nested like:
+    # calc = { ..., "scores": {...}, "prevent": {...}, ... }
+    if isinstance(calc.get("scores"), dict):
+        other.update(calc["scores"])  # type: ignore
+
+    # Also allow “flat” fallbacks if you sometimes store them at top-level
+    for k in (
+        "signatures_score",
+        "sdi",
+        "metabolic_syndrome_score",
+        "ckm_stage",
+        "chads2vasc_score",
+        "cardiac_rehab_eligibility",
+        "healthy_day_message",
+    ):
+        if k in calc and calc.get(k) is not None and k not in other:
+            other[k] = calc.get(k)
+
+    # If your calculator stores these under scores but with slightly different names,
+    # this alias map will help.
+    alias_map = {
+        "CHA2DS2_VASc": "chads2vasc_score",
+        "CHA2DS2_VASc_score": "chads2vasc_score",
+        "cardiac_rehab": "cardiac_rehab_eligibility",
+        "healthy_day_at_home": "healthy_day_message",
+    }
+    for src, dst in alias_map.items():
+        if src in other and dst not in other:
+            other[dst] = other.get(src)
+
+    if not other:
+        print("(none)")
+    else:
+        # Pretty-print with a few “nice” formats
+        preferred_order = [
+            "signatures_score",
+            "sdi",
+            "MLC_score",          # will usually already print above, but harmless if included
+            "metabolic_syndrome_score",
+            "ckm_stage",
+            "chads2vasc_score",
+            "cardiac_rehab_eligibility",
+            "healthy_day_message",
+        ]
+
+        def fmt_value(key: str, val: Any) -> str:
+            if isinstance(val, float):
+                # keep risk/percent formatting separate (PREVENT already handled above)
+                return f"{val:.2f}"
+            return str(val)
+
+        # print ordered first
+        for k in preferred_order:
+            if k in other and other[k] is not None:
+                print(f"- {k}: {fmt_value(k, other[k])}")
+
+        # print remaining keys
+        leftovers = {k: v for k, v in other.items() if k not in preferred_order and v is not None}
+        if leftovers:
+            _bullet_list(_pretty_calc_block(leftovers))
 
 # -----------------------------
 # Main
