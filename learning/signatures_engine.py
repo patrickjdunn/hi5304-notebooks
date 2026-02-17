@@ -464,6 +464,31 @@ def _prevent_tier(risk_value: Any, horizon: str = "10yr") -> str:
         return "Intermediate"
     return "High"
 
+def _is_selected(v: Any) -> bool:
+    """
+    Returns True only when the value clearly represents an active/selected state.
+    Handles Yes/No strings, booleans, and numeric flags safely.
+    """
+    if v is None:
+        return False
+
+    if isinstance(v, bool):
+        return v
+
+    if isinstance(v, (int, float)):
+        return v != 0
+
+    s = str(v).strip().lower()
+
+    if s in ("yes", "y", "true", "t", "1", "on", "checked", "selected"):
+        return True
+
+    if s in ("no", "n", "false", "f", "0", "off", "unchecked", "", "none"):
+        return False
+
+    # Conservative default: treat unknown strings as NOT selected
+    return False
+
 
 def _pretty_calc_block(obj: Any) -> List[str]:
     """
@@ -705,11 +730,11 @@ def render_signatures_sections(q: PickedQuestion):
     calc_mods_active: List[str] = []
     if isinstance(calc_mods_raw, dict):
         for k, v in calc_mods_raw.items():
-            # treat True/1/"yes" as active; False/0/None as inactive
-            if bool(v):
+            if _is_selected(v):
                 code = _safe_strip(k)
                 if code:
                     calc_mods_active.append(code)
+
 
     # Engagement drivers from calculator (these are your -1/0/+1 numeric driver values)
     calc_ed_present: List[str] = []
