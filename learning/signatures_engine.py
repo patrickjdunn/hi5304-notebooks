@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
-"""
-signatures_engine.py
 
-Signatures Engine (LLM-friendly CLI):
-
-- Keeps the clean, minimal input flow (persona -> question mode -> optional signatures tags)
-- Uses QUESTION_BANK from questions.py
-- Supports:
-  - Preloaded question picker (list + ID select)
-  - Search mode (keyword search across question text + responses)
-  - Signatures output sections:
-      behavioral core, condition modifiers, engagement drivers (-1/0/+1),
-      security rules, action plans, source + link
-  - MyLifeCheck + PREVENT hooks:
-      pulls results from combined_calculator.py if available (no re-entry required here)
-      (If combined_calculator prompts for inputs, it does so inside that module.)
-
-Important:
-- This version fixes your error by calling:
-    validate_question_bank(QUESTION_BANK, raise_on_error=False)
-  while remaining backwards-compatible even if questions.py is missing helpers.
-"""
 
 from __future__ import annotations
 
@@ -659,10 +638,29 @@ def choose_question() -> PickedQuestion:
 
     return pick_preloaded_question()
 
+def _get_calc_context_merged() -> Dict[str, Any]:
+    """
+    Safe calculator context fetch:
+    - returns {} if calculator isn't available or has no results
+    - merges CALC_CONTEXT on top (CALC_CONTEXT wins)
+    """
+    if not CALCULATOR_AVAILABLE:
+        return {}
+
+    calc = try_get_calculator_results()
+    if not isinstance(calc, dict):
+        calc = {}
+
+    # Merge in local context (wins if keys overlap)
+    if isinstance(CALC_CONTEXT, dict) and CALC_CONTEXT:
+        calc = {**calc, **CALC_CONTEXT}
+
+    return calc
 
 # -----------------------------
 # Signatures rendering
 # -----------------------------
+
 def render_signatures_sections(q: PickedQuestion):
     payload = q.payload
 
@@ -673,7 +671,7 @@ def render_signatures_sections(q: PickedQuestion):
     behavioral_core = _as_list(sig.get("behavioral_core"))
     condition_modifiers = _as_list(sig.get("condition_modifiers"))
 
-    # engagement_drivers supports -1/0/+1 scheme
+    # engagement_drivers supports -1/0/+1 scheme (from QUESTION BANK)
     ed_raw = sig.get("engagement_drivers", {})
     engagement_present: List[str] = []
     engagement_unknown: List[str] = []
@@ -695,24 +693,115 @@ def render_signatures_sections(q: PickedQuestion):
     security_rules = _as_list(payload.get("security_rules"))
     action_plans = _as_list(payload.get("action_plans"))
 
+    # -----------------------------
+    # NEW: pull calculator context blocks (if present)
+    # -----------------------------
+    calc = _get_calc_context_merged()
+
+    calc_mods_raw = calc.get("condition_modifiers", {})
+    calc_inputs_raw = calc.get("inputs", {})
+    calc_drivers_raw = calc.get("engagement_drivers", {})
+
+    calc_mods_active: List[str] = []
+    if isinstance(calc_mods_raw, dict):
+        for k, v in calc_mods_raw.items():
+            # treat True/1/"yes" as active; False/0/None as inactive
+            if bool(v):
+                code = _safe_strip(k)
+                if code:
+                    calc_mods_active.append(code)
+
+    # Engagement drivers from calculator (these are your -1/0/+1 numeric driver values)
+    calc_ed_present: List[str] = []
+    calc_ed_unknown: List[str] = []
+    calc_ed_not_present: List[str] = []
+    if isinstance(calc_drivers_raw, dict):
+        for k, v in calc_drivers_raw.items():
+            code = _safe_strip(k)
+            if not code:
+                continue
+            val = _clamp_engagement_value(v)
+            if val == 1:
+                calc_ed_present.append(code)
+            elif val == 0:
+                calc_ed_unknown.append(code)
+            else:
+                calc_ed_not_present.append(code)
+
+    # Inputs: print in a stable, human-friendly order (only if present)
+    input_order = [
+        "total_cholesterol",
+        "HDL_cholesterol",
+        "LDL_cholesterol",
+        "systolic_blood_pressure",
+        "diastolic_blood_pressure",
+        "fasting_blood_sugar",
+        "A1c",
+        "BMI",
+        "uacr",
+        "egfr",
+        "tobacco_use",
+        "sleep_hours",
+        "moderate_intensity",
+        "vigorous_intensity",
+    ]
+
+    calc_inputs_lines: List[str] = []
+    if isinstance(calc_inputs_raw, dict):
+        for k in input_order:
+            if k not in calc_inputs_raw:
+                continue
+            v = calc_inputs_raw.get(k)
+            if v is None or _safe_strip(v) == "":
+                continue
+
+            # format floats nicely
+            if isinstance(v, float):
+                calc_inputs_lines.append(f"{k}: {v:.2f}")
+            else:
+                calc_inputs_lines.append(f"{k}: {_safe_strip(v)}")
+
+    # -----------------------------
+    # Print output (existing + new)
+    # -----------------------------
     _title("Signatures Structure")
 
     print("\nBehavioral Core:")
     _bullet_list(behavioral_core)
 
-    print("\nCondition Modifiers:")
+    print("\nCondition Modifiers (from question bank):")
     _bullet_list(condition_modifiers)
 
-    print("\nEngagement Drivers (+1 present):")
+    # NEW
+    if calc:
+        print("\nCondition Modifiers (from calculator):")
+        _bullet_list(sorted(calc_mods_active))
+
+        print("\nInputs (from calculator):")
+        _bullet_list(calc_inputs_lines)
+
+        print("\nEngagement Drivers (+1 present) (from calculator):")
+        _bullet_list(sorted(calc_ed_present))
+
+        if calc_ed_unknown:
+            print("\nEngagement Drivers (0 unknown) (from calculator):")
+            _bullet_list(sorted(calc_ed_unknown))
+
+        if calc_ed_not_present:
+            print("\nEngagement Drivers (-1 not present) (from calculator):")
+            _bullet_list(sorted(calc_ed_not_present))
+
+    # Keep your existing question-bank engagement drivers too (useful for “Signature record” logic)
+    print("\nEngagement Drivers (+1 present) (from question bank):")
     _bullet_list(sorted(engagement_present))
 
-    # Keeping unknown/not-present visible but not noisy
+
     if engagement_unknown:
-        print("\nEngagement Drivers (0 unknown):")
+        print("\nEngagement Drivers (0 unknown) (from question bank):")
         _bullet_list(sorted(engagement_unknown))
 
     if engagement_not_present:
-        print("\nEngagement Drivers (-1 not present):")
+        print("\nEngagement Drivers (-1 not present) (from question bank):")
         _bullet_list(sorted(engagement_not_present))
 
     print("\nSecurity Rules:")
