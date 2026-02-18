@@ -35,6 +35,149 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 
+def _safe_strip(x: Any) -> str:
+    return str(x).strip() if x is not None else ""
+
+
+def _as_list(x: Any) -> List[Any]:
+    if x is None:
+        return []
+    if isinstance(x, list):
+        return x
+    return [x]
+
+
+def _normalize_persona(persona: str) -> str:
+    """
+    Normalizes persona keys to the form used in questions.py responses:
+      listener / motivator / director / expert
+    """
+    p = _safe_strip(persona).lower()
+    mapping = {
+        "Listener": "listener",
+        "Motivator": "motivator",
+        "Director": "director",
+        "Expert": "expert",
+    }
+    # if caller passes already-lowercase persona, keep it
+    return mapping.get(persona, p)
+
+
+def build_answer_addons(
+    question_payload: Dict[str, Any],
+    calc_context: Optional[Dict[str, Any]] = None,
+    style: str = "listener",
+) -> Dict[str, Any]:
+    """
+    Return a dict in the LLM-friendly format:
+      {
+        "base": "...",                 # optional here, engine will fill base
+        "addons": ["...", "..."],
+        "why_added": ["CAD active", "trust low"]
+      }
+
+    This function should NEVER throw. If no addons apply, return empty lists.
+    """
+    calc = calc_context or {}
+    persona = _normalize_persona(style)
+
+    addons: List[str] = []
+    why_added: List[str] = []
+
+    # -----------------------------
+    # Example rule #1: Condition modifiers selected
+    # -----------------------------
+    # We look for calc["condition_modifiers"] shaped like {"CAD": "Yes"/True, ...}
+    cm = calc.get("condition_modifiers") or {}
+    if isinstance(cm, dict):
+        # Pick only those that look "selected"
+        selected = []
+        for k, v in cm.items():
+            # treat "Yes", True, 1 as selected; everything else not selected
+            sv = str(v).strip().lower()
+            is_selected = (v is True) or (sv in ("yes", "y", "true", "1"))
+            if is_selected:
+                selected.append(str(k).strip())
+
+        # Example: if CAD selected, add a CAD-specific line
+        if "CAD" in selected:
+            addons.append("Because CAD is active in your profile, prioritize symptom awareness (chest pressure, breathlessness) and follow your care plan closely.")
+            why_added.append("CAD active")
+
+        if "HF" in selected:
+            addons.append("Because HF is active, watch daily weight and swelling, and act early on fluid changes per your plan.")
+            why_added.append("HF active")
+
+        if "AF" in selected or "AFIB" in selected:
+            addons.append("Because AF is active, stroke prevention and rhythm/rate monitoring are especially important.")
+            why_added.append("AF active")
+
+    # -----------------------------
+    # Example rule #2: Engagement driver tailoring
+    # -----------------------------
+    # We look for calc["engagement_drivers"] shaped like {"trust": -1, "selfefficacy": 1, ...}
+    ed = calc.get("engagement_drivers") or {}
+    if isinstance(ed, dict):
+        trust = ed.get("trust", 0)
+        if isinstance(trust, (int, float)) and trust < 0:
+            if persona in ("listener", "motivator"):
+                addons.append("If trust feels low right now, it’s okay to ask for simpler explanations and a clear next step—your questions are valid.")
+            else:
+                addons.append("If trust is low, ask for a one-page plan (meds, goals, warning signs, follow-up). Clarity supports confidence and adherence.")
+            why_added.append("trust low")
+
+    # -----------------------------
+    # Return structured payload (NO base here; engine provides it)
+    # -----------------------------
+    return {
+        "addons": [a for a in (_safe_strip(x) for x in addons) if a],
+        "why_added": [w for w in (_safe_strip(x) for x in why_added) if w],
+    }
+
+
+def _apply_answer_layers(
+    base_text: str,
+    question_payload: Dict[str, Any],
+    persona: str,
+    calc_context: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Engine-facing wrapper:
+      returns (final_text, layer_meta)
+    where layer_meta is ALWAYS:
+      { "base": str, "addons": [str], "why_added": [str] }
+    """
+    base = _safe_strip(base_text)
+
+    # Best-effort addon extraction; never break output
+    pkg: Dict[str, Any] = {"addons": [], "why_added": []}
+    try:
+        pkg = build_answer_addons(
+            question_payload=question_payload,
+            calc_context=calc_context or {},
+            style=persona,
+        ) or pkg
+    except Exception:
+        pkg = {"addons": [], "why_added": []}
+
+    addons = pkg.get("addons", [])
+    why_added = pkg.get("why_added", [])
+
+    # Normalize
+    addons_list = [x for x in (_safe_strip(a) for a in _as_list(addons)) if x]
+    why_list = [x for x in (_safe_strip(w) for w in _as_list(why_added)) if x]
+
+    # Build final text
+    addon_block = "\n".join(addons_list).strip()
+    final = (base + "\n\n" + addon_block).strip() if addon_block else base
+
+    layer_meta = {
+        "base": base,
+        "addons": addons_list,
+        "why_added": why_list,
+    }
+    return final, layer_meta
+
 # -----------------------------
 # Helpers (local + safe)
 # -----------------------------

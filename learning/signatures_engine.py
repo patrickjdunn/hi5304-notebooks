@@ -8,6 +8,17 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+import json
+
+try:
+    # NOTE: your file is named answer_Layers.py (capital L), so import must match on Linux.
+    from answer_Layers import build_answer_addons
+    ANSWER_LAYERS_AVAILABLE = True
+except Exception:
+    build_answer_addons = None
+    ANSWER_LAYERS_AVAILABLE = False
+
+
 CALC_CONTEXT: Dict[str, Any] = {}
 
 # -----------------------------
@@ -958,7 +969,8 @@ def render_persona_response(q: PickedQuestion, persona: PersonaKey):
                 if t:
                     text = t
                     break
-
+                    
+      
     if text:
         base = text
         # Merge calculator results + any local overrides (CALC_CONTEXT)
