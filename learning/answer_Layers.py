@@ -20,10 +20,14 @@ Design goals
 
 Usage (in signatures_engine.py)
 -------------------------------
-from answer_layers import build_answer_addons
+from answer_layers import build_answer_addons, build_layered_answer_structured
 
 addon = build_answer_addons(q, calc_context=calc, style=style_key)
 final_text = base if not addon else f"{base}\n\n{addon}"
+
+# Structured:
+payload = build_layered_answer_structured(q, base=base, calc_context=calc, style=style_key)
+print(payload["final"])
 """
 
 from __future__ import annotations
@@ -61,7 +65,6 @@ def _is_selected(value: Any) -> bool:
     if s in ("yes", "y", "true", "1", "selected", "present", "positive"):
         return True
     # fallback: if it's a non-empty string, assume it's "selected"
-    # (you can tighten this if needed)
     return True
 
 
@@ -99,7 +102,6 @@ def _get_question_engagement_tags(question: Dict[str, Any]) -> Dict[str, int]:
             try:
                 out[kk] = int(v)
             except Exception:
-                # ignore non-int-ish
                 continue
         return out
     return {}
@@ -113,10 +115,7 @@ def _bullets(items: List[str]) -> str:
 # -----------------------------
 # Layer catalogs
 # -----------------------------
-# Condition add-ons: add short, safe lines when that condition is active.
-# Keep these "general" so they can apply across many questions.
 CONDITION_ADDONS: Dict[str, Dict[str, Any]] = {
-    # Coronary artery disease
     "CAD": {
         "title": "CAD considerations",
         "lines": [
@@ -124,7 +123,6 @@ CONDITION_ADDONS: Dict[str, Dict[str, Any]] = {
             "Ask your clinician what your LDL-C target is and how your current plan supports it (meds + lifestyle).",
         ],
     },
-    # Atrial fibrillation
     "AF": {
         "title": "AFib considerations",
         "lines": [
@@ -132,7 +130,6 @@ CONDITION_ADDONS: Dict[str, Dict[str, Any]] = {
             "If you notice sustained palpitations with fainting, chest pain, or severe breathlessness, seek urgent care.",
         ],
     },
-    # Heart failure
     "HF": {
         "title": "Heart failure considerations",
         "lines": [
@@ -140,7 +137,6 @@ CONDITION_ADDONS: Dict[str, Dict[str, Any]] = {
             "If shortness of breath suddenly worsens, or you can’t lie flat, contact your care team promptly.",
         ],
     },
-    # Hypertension treatment / high BP
     "HTN": {
         "title": "Blood pressure considerations",
         "lines": [
@@ -148,7 +144,6 @@ CONDITION_ADDONS: Dict[str, Dict[str, Any]] = {
             "If readings are very high with symptoms (chest pain, severe headache, weakness, trouble speaking), seek urgent care.",
         ],
     },
-    # Diabetes
     "DM": {
         "title": "Diabetes considerations",
         "lines": [
@@ -156,7 +151,6 @@ CONDITION_ADDONS: Dict[str, Dict[str, Any]] = {
             "Ask what your A1c target is and how often to recheck based on your regimen and risk.",
         ],
     },
-    # CKM / metabolic-kidney-heart
     "CKMH": {
         "title": "Heart–kidney–metabolic considerations",
         "lines": [
@@ -164,7 +158,6 @@ CONDITION_ADDONS: Dict[str, Dict[str, Any]] = {
             "Ask how your eGFR and UACR affect your medication choices and monitoring frequency.",
         ],
     },
-    # Stroke / TIA history
     "ST": {
         "title": "Stroke/TIA considerations",
         "lines": [
@@ -172,7 +165,6 @@ CONDITION_ADDONS: Dict[str, Dict[str, Any]] = {
             "Secondary prevention often focuses on BP, cholesterol, diabetes, and rhythm (AFib) control—ask which apply to you.",
         ],
     },
-    # Cholesterol treatment (e.g., statin)
     "CH": {
         "title": "Cholesterol treatment considerations",
         "lines": [
@@ -183,10 +175,7 @@ CONDITION_ADDONS: Dict[str, Dict[str, Any]] = {
 }
 
 
-# Engagement driver add-ons based on calculator driver values (-1/0/+1).
-# These are delivery/behavioral coaching micro-snippets.
 ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
-    # Trust
     "trust": {
         -1: [
             "If you’re unsure who to trust, we can stick to one or two well-known sources and confirm the plan with your clinician.",
@@ -196,7 +185,6 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
             "Since you’re engaged with your care, consider bringing your tracked data (BP, steps, symptoms) to tighten the plan together.",
         ],
     },
-    # Health literacy
     "health_literacy": {
         -1: [
             "Here’s the short version: pick 1 change this week, track it for 7 days, and bring the results to your next visit.",
@@ -206,7 +194,6 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
             "If you like details, ask for your exact targets (BP, LDL, A1c) and how your numbers are trending over time.",
         ],
     },
-    # Readiness for change
     "readiness_for_change": {
         -1: [
             "No pressure to change everything today—choose the smallest step that feels realistic and start there.",
@@ -215,7 +202,6 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
             "Since you feel ready, choose one “next-step” goal and set a check-in date to review progress.",
         ],
     },
-    # Self-efficacy (confidence)
     "selfefficacy": {
         -1: [
             "Let’s make this easier: define a 5-minute starter step you can succeed with, then build from wins.",
@@ -224,7 +210,6 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
             "You seem confident—use that strength to build a simple routine and track streaks.",
         ],
     },
-    # Proactiveness
     "proactiveness": {
         -1: [
             "If this feels like a lot, start by writing 2 questions for your next visit—momentum often starts with clarity.",
@@ -233,7 +218,6 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
             "You’re being proactive—consider a weekly ‘health planning’ time to review meds, activity, and symptoms.",
         ],
     },
-    # Goal orientation
     "goal_orientation": {
         -1: [
             "Try one SMART goal: specific, measurable, achievable, relevant, time-bound (example: walk 10 minutes after dinner 5 days this week).",
@@ -242,7 +226,6 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
             "Pick a measurable target for the next 7 days and track it daily (minutes, steps, BP, or sleep).",
         ],
     },
-    # Independence
     "independence": {
         -1: [
             "If you rely on others, choose one support person and give them a clear role (reminders, walks, meal planning).",
@@ -251,7 +234,6 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
             "Since you prefer autonomy, use a simple self-tracking tool and bring the summary to visits.",
         ],
     },
-    # Decision style
     "decision_style": {
         -1: [
             "If decisions feel stressful, ask your clinician for 2–3 options and a recommendation, then take 24 hours to decide if needed.",
@@ -260,7 +242,6 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
             "Since you like exploring options, ask: “What are the alternatives and what evidence supports each?”",
         ],
     },
-    # Food insecurity
     "food_insecurity": {
         -1: [
             "If cost or access is a barrier, ask about budget-friendly heart-healthy staples (beans, frozen vegetables, oats) and local support resources.",
@@ -269,7 +250,6 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
             "If access is good, plan one grocery swap this week that supports your goal (lower sodium, higher fiber).",
         ],
     },
-    # Access to healthcare
     "access_to_healthcare": {
         -1: [
             "If appointments are hard to access, ask about telehealth follow-ups, remote monitoring, or community-based resources.",
@@ -281,13 +261,93 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
 }
 
 
-# If you want to only apply certain condition add-ons when the question is relevant,
-# set this to True. If False, any active condition can add its lines (still short/safe).
+# If True, condition add-ons only apply when the question's condition_modifiers include that condition.
+# If False, any active condition can add its lines (still intended to be short/safe).
 REQUIRE_QUESTION_RELEVANCE_FOR_CONDITION_ADDONS = False
 
 
 # -----------------------------
-# Main builder
+# Internal collector (NEW)
+# -----------------------------
+def _collect_addons_and_reasons(
+    question: Dict[str, Any],
+    calc_context: Optional[Dict[str, Any]],
+) -> Tuple[List[str], List[str], Dict[str, Any]]:
+    """
+    Returns:
+      addons: [line1, line2, ...]           (flat list of bullet lines)
+      why_added: ["CAD active", "trust -1", ...]
+      debug: { ... }                        (safe debug info)
+    """
+    if not isinstance(question, dict):
+        return [], [], {"error": "question not dict"}
+
+    calc_context = calc_context if isinstance(calc_context, dict) else {}
+
+    calc_conditions = _get_calc_block(calc_context, "condition_modifiers")
+    calc_drivers = _get_calc_block(calc_context, "engagement_drivers")
+
+    q_condition_tags = set(_get_question_condition_tags(question))
+
+    addons: List[str] = []
+    why: List[str] = []
+
+    # Active conditions
+    active_conditions: List[str] = []
+    for code, raw in calc_conditions.items():
+        code_u = str(code).strip().upper()
+        if not code_u:
+            continue
+        if _is_selected(raw):
+            active_conditions.append(code_u)
+
+    # Condition lines
+    for cond in active_conditions:
+        if cond not in CONDITION_ADDONS:
+            continue
+
+        if REQUIRE_QUESTION_RELEVANCE_FOR_CONDITION_ADDONS:
+            if q_condition_tags and (cond not in q_condition_tags):
+                continue
+
+        payload = CONDITION_ADDONS.get(cond, {})
+        lines = payload.get("lines", [])
+        if isinstance(lines, list):
+            for line in lines:
+                line_s = _safe_strip(line)
+                if line_s:
+                    addons.append(line_s)
+        why.append(f"{cond} active")
+
+    # Engagement driver lines
+    matched_drivers: Dict[str, int] = {}
+    for driver_key, variants in ENGAGEMENT_ADDONS.items():
+        if driver_key not in calc_drivers:
+            continue
+        try:
+            val = int(calc_drivers.get(driver_key))
+        except Exception:
+            continue
+        if val not in (-1, 0, 1) or val == 0:
+            continue
+        matched_drivers[driver_key] = val
+
+        for line in variants.get(val, []):
+            line_s = _safe_strip(line)
+            if line_s:
+                addons.append(line_s)
+        why.append(f"{driver_key} {val}")
+
+    debug = {
+        "active_conditions": active_conditions,
+        "question_condition_tags": sorted(list(q_condition_tags)),
+        "matched_drivers": matched_drivers,
+    }
+    return addons, why, debug
+
+
+# -----------------------------
+# Main builder (UNCHANGED public API)
 # -----------------------------
 def build_answer_addons(
     question: Dict[str, Any],
@@ -297,94 +357,15 @@ def build_answer_addons(
     """
     Returns a single string with optional add-on content.
 
-    - question: a question dict from the built question bank
-    - calc_context: combined_calculator results merged with CALC_CONTEXT
-    - style: "listener" | "motivator" | "director" | "expert" (or any string; we don't depend on it)
-
     If no add-ons match, returns "".
     """
-    if not isinstance(question, dict):
-        return ""
-    calc_context = calc_context if isinstance(calc_context, dict) else {}
-
-    # pull calculator blocks
-    calc_conditions = _get_calc_block(calc_context, "condition_modifiers")
-    calc_drivers = _get_calc_block(calc_context, "engagement_drivers")
-
-    # question tags
-    q_condition_tags = set(_get_question_condition_tags(question))  # e.g., {"AF", "CAD"}
-    # Note: question engagement tags exist too, but we typically use calculator drivers for add-ons.
-
-    addon_lines: List[str] = []
-    addon_sections: List[Tuple[str, List[str]]] = []
-
-    # -----------------------------
-    # Condition modifiers add-ons
-    # -----------------------------
-    active_conditions: List[str] = []
-    for code, raw in calc_conditions.items():
-        code_u = str(code).strip().upper()
-        if not code_u:
-            continue
-        if _is_selected(raw):
-            active_conditions.append(code_u)
-
-    cond_lines: List[str] = []
-    for cond in active_conditions:
-        if cond not in CONDITION_ADDONS:
-            continue
-
-        if REQUIRE_QUESTION_RELEVANCE_FOR_CONDITION_ADDONS:
-            if q_condition_tags and (cond not in q_condition_tags):
-                # question has tags and this condition is not among them -> skip
-                continue
-
-        payload = CONDITION_ADDONS.get(cond, {})
-        for line in payload.get("lines", []):
-            if _safe_strip(line):
-                cond_lines.append(_safe_strip(line))
-
-    if cond_lines:
-        addon_sections.append(("Condition-tailored notes", cond_lines))
-
-    # -----------------------------
-    # Engagement driver add-ons
-    # -----------------------------
-    # Expecting calculator drivers keys like:
-    # "trust", "health_literacy", "readiness_for_change", etc with -1/0/+1
-    drv_lines: List[str] = []
-    for driver_key, variants in ENGAGEMENT_ADDONS.items():
-        if not isinstance(variants, dict):
-            continue
-        if driver_key not in calc_drivers:
-            continue
-        try:
-            val = int(calc_drivers.get(driver_key))
-        except Exception:
-            continue
-        if val not in (-1, 0, 1):
-            continue
-        if val == 0:
-            continue
-        for line in variants.get(val, []):
-            if _safe_strip(line):
-                drv_lines.append(_safe_strip(line))
-
-    if drv_lines:
-        addon_sections.append(("Personalized support", drv_lines))
-
-    # -----------------------------
-    # Assemble output
-    # -----------------------------
-    if not addon_sections:
+    addons, _why, _debug = _collect_addons_and_reasons(question, calc_context)
+    if not addons:
         return ""
 
-    blocks: List[str] = []
-    for title, lines in addon_sections:
-        # Keep it compact: header + bullets
-        blocks.append(f"{title}:\n{_bullets(lines)}")
-
-    return "\n\n".join(blocks).strip()
+    # Keep it compact: two small sections (conditions + drivers) is nice,
+    # but your requested JSON is flat. For this string version, we keep it simple:
+    return _bullets(addons).strip()
 
 
 # Optional: structured form (useful for future LLM prompting)
@@ -394,73 +375,52 @@ def build_answer_addons_structured(
     style: str,
 ) -> Dict[str, Any]:
     """
-    Like build_answer_addons(), but returns structure:
+    Like build_answer_addons(), but returns:
       {
         "text": "...",
-        "sections": [{"title": "...", "bullets": [...]}, ...],
-        "debug": {"active_conditions": [...], "matched_drivers": {...}}
+        "addons": [...],
+        "why_added": [...],
+        "debug": {...}
       }
     """
-    calc_context = calc_context if isinstance(calc_context, dict) else {}
-    calc_conditions = _get_calc_block(calc_context, "condition_modifiers")
-    calc_drivers = _get_calc_block(calc_context, "engagement_drivers")
-
-    q_condition_tags = set(_get_question_condition_tags(question))
-
-    active_conditions: List[str] = []
-    for code, raw in calc_conditions.items():
-        code_u = str(code).strip().upper()
-        if not code_u:
-            continue
-        if _is_selected(raw):
-            active_conditions.append(code_u)
-
-    sections: List[Dict[str, Any]] = []
-    matched_drivers: Dict[str, int] = {}
-
-    # Conditions
-    cond_lines: List[str] = []
-    for cond in active_conditions:
-        if cond not in CONDITION_ADDONS:
-            continue
-        if REQUIRE_QUESTION_RELEVANCE_FOR_CONDITION_ADDONS:
-            if q_condition_tags and (cond not in q_condition_tags):
-                continue
-        payload = CONDITION_ADDONS.get(cond, {})
-        for line in payload.get("lines", []):
-            if _safe_strip(line):
-                cond_lines.append(_safe_strip(line))
-    if cond_lines:
-        sections.append({"title": "Condition-tailored notes", "bullets": cond_lines})
-
-    # Drivers
-    drv_lines: List[str] = []
-    for driver_key, variants in ENGAGEMENT_ADDONS.items():
-        if driver_key not in calc_drivers:
-            continue
-        try:
-            val = int(calc_drivers.get(driver_key))
-        except Exception:
-            continue
-        if val in (-1, 1):
-            matched_drivers[driver_key] = val
-            for line in variants.get(val, []):
-                if _safe_strip(line):
-                    drv_lines.append(_safe_strip(line))
-    if drv_lines:
-        sections.append({"title": "Personalized support", "bullets": drv_lines})
-
-    text_blocks = []
-    for s in sections:
-        text_blocks.append(f"{s['title']}:\n{_bullets(s.get('bullets', []))}")
-    text = "\n\n".join(text_blocks).strip()
-
+    addons, why_added, debug = _collect_addons_and_reasons(question, calc_context)
+    text = _bullets(addons).strip() if addons else ""
     return {
         "text": text,
-        "sections": sections,
-        "debug": {
-            "active_conditions": active_conditions,
-            "question_condition_tags": sorted(list(q_condition_tags)),
-            "matched_drivers": matched_drivers,
-        },
+        "addons": addons,
+        "why_added": why_added,
+        "debug": debug,
+    }
+
+
+# -----------------------------
+# NEW: the exact structure you requested
+# -----------------------------
+def build_layered_answer_structured(
+    question: Dict[str, Any],
+    base: str,
+    calc_context: Optional[Dict[str, Any]],
+    style: str,
+) -> Dict[str, Any]:
+    """
+    Returns exactly the payload you asked for:
+
+    {
+      "base": "...",
+      "addons": ["...", "..."],
+      "why_added": ["CAD active", "trust -1"],
+      "final": "base\\n\\n- addon...\\n- addon..."
+    }
+    """
+    base_s = _safe_strip(base)
+    addons, why_added, _debug = _collect_addons_and_reasons(question, calc_context)
+
+    addon_text = _bullets(addons).strip() if addons else ""
+    final = (base_s + "\n\n" + addon_text).strip() if addon_text else base_s
+
+    return {
+        "base": base_s,
+        "addons": addons,
+        "why_added": why_added,
+        "final": final,
     }
