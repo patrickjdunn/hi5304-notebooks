@@ -46,6 +46,17 @@ try:
 except Exception:
     search_questions = None  # type: ignore
 
+# --- Optional: answer layering (condition modifiers + engagement drivers) ---
+try:
+    # Expected in answer_layers.py (user module)
+    # build_answer_addons(question_dict, calc_context, style) -> str | dict | tuple
+    from answer_layers import build_answer_addons  # type: ignore
+    ANSWER_LAYERS_AVAILABLE = True
+except Exception as _e:  # pragma: no cover
+    build_answer_addons = None  # type: ignore
+    ANSWER_LAYERS_AVAILABLE = False
+    ANSWER_LAYERS_IMPORT_ERROR = str(_e)
+
 
 # -----------------------------
 # Optional combined_calculator import
@@ -870,6 +881,63 @@ def render_sources(q: PickedQuestion):
             print(f"- {st}")
 
 
+
+def _apply_answer_layers(
+    *,
+    base_text: str,
+    question_payload: Dict[str, Any],
+    persona: PersonaKey,
+    calc_context: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """
+    Combine a base response with optional answer-layer addons from answer_layers.py.
+
+    Returns (final_text, meta_dict). meta_dict is shaped like:
+      {"base": str, "addons": [str...], "why_added": [str...] }
+    """
+    if not ANSWER_LAYERS_AVAILABLE or build_answer_addons is None:
+        return base_text, None
+
+    try:
+        res = build_answer_addons(question_payload, calc_context=calc_context or {}, style=persona)
+    except Exception:
+        # Never let addons break the core engine output.
+        return base_text, None
+
+    addon_text = ""
+    meta: Optional[Dict[str, Any]] = None
+
+    if isinstance(res, str):
+        addon_text = res.strip()
+    elif isinstance(res, dict):
+        # Expected keys: base/addons/why_added (+ optional text/addon)
+        meta = {
+            "base": _safe_strip(res.get("base", base_text)),
+            "addons": list(res.get("addons", []) or []),
+            "why_added": list(res.get("why_added", []) or []),
+        }
+        # Prefer explicit combined text if provided
+        if isinstance(res.get("text"), str):
+            addon_text = res.get("text", "").strip()
+        elif isinstance(res.get("addon"), str):
+            addon_text = res.get("addon", "").strip()
+        else:
+            addon_text = "\n\n".join([_safe_strip(a) for a in meta["addons"] if _safe_strip(a)]).strip()
+    elif isinstance(res, tuple) and len(res) >= 1:
+        # Allow (addon_text,) or (addon_text, meta_dict)
+        addon_text = _safe_strip(res[0])
+        if len(res) > 1 and isinstance(res[1], dict):
+            meta = res[1]
+    else:
+        addon_text = ""
+
+    final = (base_text + "\n\n" + addon_text).strip() if addon_text else base_text
+
+    # If meta wasn't provided, build a minimal one when we have addon text
+    if meta is None and addon_text:
+        meta = {"base": base_text, "addons": [addon_text], "why_added": []}
+
+    return final, meta
 def render_persona_response(q: PickedQuestion, persona: PersonaKey):
     payload = q.payload
     responses = payload.get("responses", {})
@@ -892,7 +960,26 @@ def render_persona_response(q: PickedQuestion, persona: PersonaKey):
                     break
 
     if text:
-        print(text)
+        base = text
+        # Merge calculator results + any local overrides (CALC_CONTEXT)
+        calc = try_get_calculator_results() if CALCULATOR_AVAILABLE else {}
+        if isinstance(CALC_CONTEXT, dict) and CALC_CONTEXT:
+            calc = {**(calc or {}), **CALC_CONTEXT}
+
+        final, layer_meta = _apply_answer_layers(
+            base_text=base,
+            question_payload=q,
+            persona=persona,
+            calc_context=calc if isinstance(calc, dict) else {},
+        )
+        print(final)
+
+        # Optional: show the layer debug payload (useful while you build rules)
+        if layer_meta:
+            print("\nAnswer Layers")
+            print("============")
+            import json as _json
+            print(_json.dumps(layer_meta, indent=2, ensure_ascii=False))
     else:
         print("(no persona response available yet for this question)")
 
@@ -1117,6 +1204,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
