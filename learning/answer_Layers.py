@@ -537,7 +537,7 @@ def build_answer_addons_structured(
 
 
 # -----------------------------
-# NEW: the exact structure you requested
+# NEW: Answers structure
 # -----------------------------
 def build_layered_answer_structured(
     question: Dict[str, Any],
