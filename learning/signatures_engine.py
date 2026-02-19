@@ -8,17 +8,6 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-import json
-
-try:
-    # NOTE: your file is named answer_Layers.py (capital L), so import must match on Linux.
-    from answer_Layers import build_answer_addons
-    ANSWER_LAYERS_AVAILABLE = True
-except Exception:
-    build_answer_addons = None
-    ANSWER_LAYERS_AVAILABLE = False
-
-
 CALC_CONTEXT: Dict[str, Any] = {}
 
 # -----------------------------
@@ -341,6 +330,26 @@ def try_get_calculator_results() -> Dict[str, Any]:
     return {}
 
 from typing import Any, Dict, Optional, Tuple
+
+
+
+def get_merged_calc_context() -> Dict[str, Any]:
+    """Return calculator results merged with any local overrides (CALC_CONTEXT)."""
+    base: Dict[str, Any] = {}
+    if CALCULATOR_AVAILABLE:
+        try:
+            base = try_get_calculator_results() or {}
+        except Exception:
+            base = {}
+    if not isinstance(base, dict):
+        base = {}
+
+    if isinstance(CALC_CONTEXT, dict) and CALC_CONTEXT:
+        try:
+            base = {**base, **CALC_CONTEXT}
+        except Exception:
+            pass
+    return base
 
 def extract_mylifecheck_prevent(calc: Dict[str, Any]) -> Tuple[Optional[Any], Optional[Any]]:
     """
@@ -708,155 +717,129 @@ def _get_calc_context_merged() -> Dict[str, Any]:
 # Signatures rendering
 # -----------------------------
 
-def render_signatures_sections(q: PickedQuestion):
-    payload = q.payload
+def render_signatures_sections(
+    q: Dict[str, Any],
+    calc_override: Optional[Dict[str, Any]] = None,
+) -> None:
+    _title("Signatures Structure")
 
-    sig = payload.get("signatures", {})
+    sig = q.get("signatures", {}) if isinstance(q, dict) else {}
     if not isinstance(sig, dict):
         sig = {}
 
-    behavioral_core = _as_list(sig.get("behavioral_core"))
-    condition_modifiers = _as_list(sig.get("condition_modifiers"))
+    calc = calc_override if isinstance(calc_override, dict) else get_merged_calc_context()
+    cm_calc = calc.get("condition_modifiers") if isinstance(calc, dict) else None
+    ed_calc = calc.get("engagement_drivers") if isinstance(calc, dict) else None
 
-    # engagement_drivers supports -1/0/+1 scheme (from QUESTION BANK)
-    ed_raw = sig.get("engagement_drivers", {})
-    engagement_present: List[str] = []
-    engagement_unknown: List[str] = []
-    engagement_not_present: List[str] = []
-
-    if isinstance(ed_raw, dict):
-        for k, v in ed_raw.items():
-            code = _safe_strip(k)
-            val = _clamp_engagement_value(v)
-            if not code:
-                continue
-            if val == 1:
-                engagement_present.append(code)
-            elif val == 0:
-                engagement_unknown.append(code)
-            else:
-                engagement_not_present.append(code)
-
-    security_rules = _as_list(payload.get("security_rules"))
-    action_plans = _as_list(payload.get("action_plans"))
-
-    # -----------------------------
-    # NEW: pull calculator context blocks (if present)
-    # -----------------------------
-    calc = _get_calc_context_merged()
-
-    calc_mods_raw = calc.get("condition_modifiers", {})
-    calc_inputs_raw = calc.get("inputs", {})
-    calc_drivers_raw = calc.get("engagement_drivers", {})
-
-    calc_mods_active: List[str] = []
-    if isinstance(calc_mods_raw, dict):
-        for k, v in calc_mods_raw.items():
-            if _is_selected(v):
-                code = _safe_strip(k)
-                if code:
-                    calc_mods_active.append(code)
-
-
-    # Engagement drivers from calculator (these are your -1/0/+1 numeric driver values)
-    calc_ed_present: List[str] = []
-    calc_ed_unknown: List[str] = []
-    calc_ed_not_present: List[str] = []
-    if isinstance(calc_drivers_raw, dict):
-        for k, v in calc_drivers_raw.items():
-            code = _safe_strip(k)
-            if not code:
-                continue
-            val = _clamp_engagement_value(v)
-            if val == 1:
-                calc_ed_present.append(code)
-            elif val == 0:
-                calc_ed_unknown.append(code)
-            else:
-                calc_ed_not_present.append(code)
-
-    # Inputs: print in a stable, human-friendly order (only if present)
-    input_order = [
-        "total_cholesterol",
-        "HDL_cholesterol",
-        "LDL_cholesterol",
-        "systolic_blood_pressure",
-        "diastolic_blood_pressure",
-        "fasting_blood_sugar",
-        "A1c",
-        "BMI",
-        "uacr",
-        "egfr",
-        "tobacco_use",
-        "sleep_hours",
-        "moderate_intensity",
-        "vigorous_intensity",
-    ]
-
-    calc_inputs_lines: List[str] = []
-    if isinstance(calc_inputs_raw, dict):
-        for k in input_order:
-            if k not in calc_inputs_raw:
-                continue
-            v = calc_inputs_raw.get(k)
-            if v is None or _safe_strip(v) == "":
-                continue
-
-            # format floats nicely
-            if isinstance(v, float):
-                calc_inputs_lines.append(f"{k}: {v:.2f}")
-            else:
-                calc_inputs_lines.append(f"{k}: {_safe_strip(v)}")
-
-    # -----------------------------
-    # Print output (existing + new)
-    # -----------------------------
-    _title("Signatures Structure")
+    core = sig.get("behavioral_core", [])
+    if not core:
+        core = sig.get("behavioral_core_codes", [])
+    core_list = [str(x).strip() for x in core] if isinstance(core, list) else []
 
     print("\nBehavioral Core:")
-    _bullet_list(behavioral_core)
+    if core_list:
+        for c in core_list:
+            if c:
+                print(f"- {c}")
+    else:
+        print("(none)")
 
+    q_mods = sig.get("condition_modifiers", [])
+    q_mods_list = [str(x).strip().upper() for x in q_mods] if isinstance(q_mods, list) else []
     print("\nCondition Modifiers (from question bank):")
-    _bullet_list(condition_modifiers)
+    if q_mods_list:
+        for c in q_mods_list:
+            if c:
+                print(f"- {c}")
+    else:
+        print("(none)")
 
-    # NEW
-    if calc:
-        print("\nCondition Modifiers (from calculator):")
-        _bullet_list(sorted(calc_mods_active))
+    print("\nCondition Modifiers (from calculator):")
+    selected_cm: List[str] = []
+    if isinstance(cm_calc, dict):
+        for k, v in cm_calc.items():
+            if _is_selected(v):
+                kk = str(k).strip().upper()
+                if kk:
+                    selected_cm.append(kk)
+    if selected_cm:
+        for c in sorted(set(selected_cm)):
+            print(f"- {c}")
+    else:
+        print("(none)")
 
-        print("\nInputs (from calculator):")
-        _bullet_list(calc_inputs_lines)
+    if isinstance(ed_calc, dict):
+        plus = sorted([k for k, v in ed_calc.items() if isinstance(v, (int, float)) and v > 0])
+        zero = sorted([k for k, v in ed_calc.items() if isinstance(v, (int, float)) and v == 0])
+        neg = sorted([k for k, v in ed_calc.items() if isinstance(v, (int, float)) and v < 0])
 
         print("\nEngagement Drivers (+1 present) (from calculator):")
-        _bullet_list(sorted(calc_ed_present))
+        if plus:
+            for k in plus:
+                print(f"- {k}")
+        else:
+            print("(none)")
 
-        if calc_ed_unknown:
-            print("\nEngagement Drivers (0 unknown) (from calculator):")
-            _bullet_list(sorted(calc_ed_unknown))
+        print("\nEngagement Drivers (0 unknown) (from calculator):")
+        if zero:
+            for k in zero:
+                print(f"- {k}")
+        else:
+            print("(none)")
 
-        if calc_ed_not_present:
-            print("\nEngagement Drivers (-1 not present) (from calculator):")
-            _bullet_list(sorted(calc_ed_not_present))
+        print("\nEngagement Drivers (-1 not present) (from calculator):")
+        if neg:
+            for k in neg:
+                print(f"- {k}")
+        else:
+            print("(none)")
 
-    # Keep your existing question-bank engagement drivers too (useful for “Signature record” logic)
+    q_ed = sig.get("engagement_drivers", {})
+    q_plus: List[str] = []
+    q_zero: List[str] = []
+    if isinstance(q_ed, dict):
+        for k, v in q_ed.items():
+            try:
+                iv = int(v)
+            except Exception:
+                continue
+            kk = str(k).strip()
+            if not kk:
+                continue
+            if iv > 0:
+                q_plus.append(kk)
+            elif iv == 0:
+                q_zero.append(kk)
+
     print("\nEngagement Drivers (+1 present) (from question bank):")
-    _bullet_list(sorted(engagement_present))
+    if q_plus:
+        for k in sorted(q_plus):
+            print(f"- {k}")
+    else:
+        print("(none)")
 
+    print("\nEngagement Drivers (0 unknown) (from question bank):")
+    if q_zero:
+        for k in sorted(q_zero):
+            print(f"- {k}")
+    else:
+        print("(none)")
 
-    if engagement_unknown:
-        print("\nEngagement Drivers (0 unknown) (from question bank):")
-        _bullet_list(sorted(engagement_unknown))
+    rules = sig.get("security_rules", [])
+    if isinstance(rules, list) and rules:
+        print("\nSecurity Rules:")
+        for r in rules:
+            rr = _safe_strip(r)
+            if rr:
+                print(f"- {rr}")
 
-    if engagement_not_present:
-        print("\nEngagement Drivers (-1 not present) (from question bank):")
-        _bullet_list(sorted(engagement_not_present))
-
-    print("\nSecurity Rules:")
-    _bullet_list(security_rules)
-
-    print("\nAction Plans:")
-    _bullet_list(action_plans)
-
+    plans = sig.get("action_plans", [])
+    if isinstance(plans, list) and plans:
+        print("\nAction Plans:")
+        for p in plans:
+            pp = _safe_strip(p)
+            if pp:
+                print(f"- {pp}")
 
 def render_sources(q: PickedQuestion):
     payload = q.payload
@@ -949,34 +932,55 @@ def _apply_answer_layers(
         meta = {"base": base_text, "addons": [addon_text], "why_added": []}
 
     return final, meta
-def render_persona_response(q: PickedQuestion, persona: PersonaKey):
-    payload = q.payload
-    responses = payload.get("responses", {})
+def render_question_header(q: Any) -> None:
+    """Print the selected question header once (before Inputs / Scoring / Answer).
 
-    _title("Answer")
-    print(f"Question [{q.category}] {q.qid}: {q.question}\n")
+    The selected question is often represented as a PickedQuestion wrapper
+    (with a `.payload` dict). Accept either a PickedQuestion or a dict.
+    """
+    _title("Question")
 
-    # If question has a direct persona response, use it; otherwise fall back.
-    text = ""
-    if isinstance(responses, dict):
-        text = _safe_strip(responses.get(persona, ""))
+    payload: Dict[str, Any]
+    if isinstance(q, PickedQuestion):
+        payload = q.payload
+    elif isinstance(q, dict):
+        payload = q
+    else:
+        payload = {}
 
-    if not text:
-        # fallback: try any available persona
-        if isinstance(responses, dict):
-            for p in PERSONAS:
-                t = _safe_strip(responses.get(p, ""))
-                if t:
-                    text = t
-                    break
-                    
-      
+    qid = payload.get("id", "UNKNOWN")
+    category = payload.get("category", "GENERAL")
+    question = payload.get("question", "(missing question)")
+    print(f"[{category}] {qid}: {question}")
+
+
+def render_persona_response(
+    q: Dict[str, Any],
+    style_key: str,
+    persona: str,
+    calc_override: Optional[Dict[str, Any]] = None,
+    *,
+    show_title: bool = True,
+    show_question: bool = True,
+) -> None:
+    if show_title:
+        _title("Answer")
+
+    if show_question:
+        qid = q.get("id", "UNKNOWN")
+        category = q.get("category", "GENERAL")
+        question = q.get("question", "(missing question)")
+        print(f"Question [{category}] {qid}: {question}\n")
+
+    responses = q.get("responses", {}) if isinstance(q, dict) else {}
+    if not isinstance(responses, dict):
+        responses = {}
+
+    text = responses.get(style_key) or responses.get(persona) or ""
+
     if text:
         base = text
-        # Merge calculator results + any local overrides (CALC_CONTEXT)
-        calc = try_get_calculator_results() if CALCULATOR_AVAILABLE else {}
-        if isinstance(CALC_CONTEXT, dict) and CALC_CONTEXT:
-            calc = {**(calc or {}), **CALC_CONTEXT}
+        calc = calc_override if isinstance(calc_override, dict) else get_merged_calc_context()
 
         final, layer_meta = _apply_answer_layers(
             base_text=base,
@@ -986,7 +990,6 @@ def render_persona_response(q: PickedQuestion, persona: PersonaKey):
         )
         print(final)
 
-        # Optional: show the layer debug payload (useful while you build rules)
         if layer_meta:
             print("\nAnswer Layers")
             print("============")
@@ -995,7 +998,7 @@ def render_persona_response(q: PickedQuestion, persona: PersonaKey):
     else:
         print("(no persona response available yet for this question)")
 
-    # Action Step / Why (optional, but common pattern)
+    payload = q.get("signatures", {}) if isinstance(q, dict) else {}
     action_step = _safe_strip(payload.get("action_step", ""))
     why = _safe_strip(payload.get("why_it_matters", ""))
 
@@ -1006,77 +1009,80 @@ def render_persona_response(q: PickedQuestion, persona: PersonaKey):
         if why:
             print(f"Why it matters: {why}")
 
+def render_input_values(calc_override: Optional[Dict[str, Any]] = None) -> None:
+    """Print calculator input values (if available) above the Answer."""
+    _title("Input Values")
 
-# -----------------------------
-# Calculator rendering
-# -----------------------------
-def render_scoring_hooks() -> None:
+    if not CALCULATOR_AVAILABLE and not isinstance(calc_override, dict):
+        print("(calculator not available)")
+        return
+
+    calc = calc_override if isinstance(calc_override, dict) else get_merged_calc_context()
+
+    inputs = calc.get("inputs") if isinstance(calc, dict) else None
+    if not isinstance(inputs, dict) or not inputs:
+        print("(none)")
+        return
+
+    preferred = [
+        "total_cholesterol",
+        "HDL_cholesterol",
+        "LDL_cholesterol",
+        "systolic_blood_pressure",
+        "diastolic_blood_pressure",
+        "fasting_blood_sugar",
+        "A1c",
+        "BMI",
+        "uacr",
+        "egfr",
+        "tobacco_use",
+        "sleep_hours",
+        "moderate_intensity",
+        "vigorous_intensity",
+    ]
+
+    for k in preferred:
+        if k in inputs:
+            v = inputs.get(k)
+            if isinstance(v, float):
+                if k in ("A1c", "BMI"):
+                    print(f"- {k}: {v:.2f}")
+                else:
+                    print(f"- {k}: {v}")
+            else:
+                print(f"- {k}: {_safe_strip(v)}")
+
+    extras = [k for k in inputs.keys() if k not in preferred]
+    for k in sorted(extras):
+        print(f"- {k}: {_safe_strip(inputs.get(k))}")
+
+def render_scoring_hooks(calc_override: Optional[Dict[str, Any]] = None) -> None:
     _title("Scoring Hooks (MyLifeCheck + PREVENT)")
 
-    # Always define these so they can never be "unbound"
-    calc: Dict[str, Any] = {}
-    mylife: Optional[Any] = None
-    prevent: Optional[Any] = None
-
-    if not CALCULATOR_AVAILABLE:
+    if not CALCULATOR_AVAILABLE and not isinstance(calc_override, dict):
         print("combined_calculator.py not available.")
         if CALCULATOR_IMPORT_ERROR:
             print("Import error:", CALCULATOR_IMPORT_ERROR)
         print("(You can still use Signatures without scoring.)")
         return
 
-    # ---------------------
-    # Pull calculator results safely
-    # ---------------------
-    try:
-        calc = try_get_calculator_results() or {}
-        if not isinstance(calc, dict):
-            calc = {"_raw": calc}
-    except Exception as e:
-        print("⚠️ Could not load calculator results:", e)
-        calc = {}
+    calc = calc_override if isinstance(calc_override, dict) else get_merged_calc_context()
 
-    # Merge in local context (wins if keys overlap)
-    try:
-        if isinstance(CALC_CONTEXT, dict) and CALC_CONTEXT:
-            calc = {**calc, **CALC_CONTEXT}
-    except Exception as e:
-        print("⚠️ Could not merge CALC_CONTEXT:", e)
+    mylife, prevent = extract_mylifecheck_prevent(calc)
 
-    
-    # ---------------------
-    # Extract hooks safely
-    # ---------------------
-    try:
-        mylife, prevent = extract_mylifecheck_prevent(calc)
-    except Exception as e:
-        print("⚠️ extract_mylifecheck_prevent failed:", e)
-        mylife, prevent = None, None
-
-    # ---------------------
-    # MyLifeCheck / LE8
-    # ---------------------
     print("\nMyLifeCheck / Life's Essential 8:")
-
-    rest: Dict[str, Any] = {}
     if isinstance(mylife, dict) and isinstance(mylife.get("MLC_score"), (int, float)):
         mlc = float(mylife["MLC_score"])
         tier = _mlc_tier(mlc)
         tier_suffix = f" ({tier})" if tier else ""
-        #print(f"- MLC_score: {mlc:.2f}{tier_suffix}")
-
+        print(f"- MLC_score: {mlc:.2f}{tier_suffix}")
         rest = {k: v for k, v in mylife.items() if k != "MLC_score"}
-    if rest:
-        _bullet_list(_pretty_calc_block(rest))
-
+        if rest:
+            _bullet_list(_pretty_calc_block(rest))
     else:
         _bullet_list(_pretty_calc_block(mylife))
 
-    # ---------------------
-    # PREVENT
-    # ---------------------
     print("\nPREVENT Risk:")
-
     if isinstance(prevent, dict) and prevent:
         items = list(prevent.items())
 
@@ -1086,7 +1092,7 @@ def render_scoring_hooks() -> None:
                 return (0, k)
             if "30" in k and "yr" in k:
                 return (1, k)
-            if "risk_score" in k or "last_risk_score" in k:
+            if "risk_score" in k:
                 return (2, k)
             return (3, k)
 
@@ -1102,77 +1108,19 @@ def render_scoring_hooks() -> None:
     else:
         _bullet_list(_pretty_calc_block(prevent))
 
-    # ---------------------
-    # Other Scores
-    # ---------------------
-    print("\nOther Scores:")
+    scores = calc.get("scores") if isinstance(calc, dict) else None
+    if isinstance(scores, dict) and scores:
+        print("\nOther Scores:")
+        omit = {"MLC_score", "PREVENT"}
+        preferred = ["signatures_score", "sdi", "metabolic_syndrome_score", "ckm_stage", "chads2vasc_score"]
+        for k in preferred:
+            if k in scores and k not in omit:
+                print(f"- {k}: {scores.get(k)}")
+        for k, v in scores.items():
+            if k in omit or k in preferred:
+                continue
+            print(f"- {k}: {v}")
 
-    other: Dict[str, Any] = {}
-
-    # Most of your outputs are nested like:
-    # calc = { ..., "scores": {...}, "prevent": {...}, ... }
-    if isinstance(calc.get("scores"), dict):
-        other.update(calc["scores"])  # type: ignore
-
-    # Also allow “flat” fallbacks if you sometimes store them at top-level
-    for k in (
-        "signatures_score",
-        "sdi",
-        "metabolic_syndrome_score",
-        "ckm_stage",
-        "chads2vasc_score",
-        "cardiac_rehab_eligibility",
-        "healthy_day_message",
-    ):
-        if k in calc and calc.get(k) is not None and k not in other:
-            other[k] = calc.get(k)
-
-    # If your calculator stores these under scores but with slightly different names,
-    # this alias map will help.
-    alias_map = {
-        "CHA2DS2_VASc": "chads2vasc_score",
-        "CHA2DS2_VASc_score": "chads2vasc_score",
-        "cardiac_rehab": "cardiac_rehab_eligibility",
-        "healthy_day_at_home": "healthy_day_message",
-    }
-    for src, dst in alias_map.items():
-        if src in other and dst not in other:
-            other[dst] = other.get(src)
-
-    if not other:
-        print("(none)")
-    else:
-        # Pretty-print with a few “nice” formats
-        preferred_order = [
-            "signatures_score",
-            "sdi",
-            "MLC_score",          # will usually already print above, but harmless if included
-            "metabolic_syndrome_score",
-            "ckm_stage",
-            "chads2vasc_score",
-            "cardiac_rehab_eligibility",
-            "healthy_day_message",
-        ]
-
-        def fmt_value(key: str, val: Any) -> str:
-            if isinstance(val, float):
-                # keep risk/percent formatting separate (PREVENT already handled above)
-                return f"{val:.2f}"
-            return str(val)
-
-        # print ordered first
-        for k in preferred_order:
-            if k in other and other[k] is not None:
-                print(f"- {k}: {fmt_value(k, other[k])}")
-
-        # print remaining keys
-        leftovers = {k: v for k, v in other.items() if k not in preferred_order and v is not None}
-        if leftovers:
-            _bullet_list(_pretty_calc_block(leftovers))
-
-# -----------------------------
-# Main
-# -----------------------------
 def pick_persona() -> PersonaKey:
     _title("Signatures Engine")
 
@@ -1200,13 +1148,21 @@ def main():
     persona = pick_persona()
     q = choose_question()
 
-    render_persona_response(q, persona)
+    # Pull calculator context once so every section stays in sync.
+    calc = get_merged_calc_context()
+
+    # Desired order (after the question is selected):
+    # Question -> Inputs -> Scoring Hooks -> Answer -> Signatures Structure -> Source
+    render_question_header(q)
+    render_input_values(calc)
+    render_scoring_hooks(calc)
+
+    # render_persona_response expects (q, style_key, persona_display).
+    # Do not repeat the question line because we printed it above.
+    render_persona_response(q.payload, persona, persona, calc_override=calc, show_question=False)
 
     # Always show Signatures Structure (fundamental)
-    render_signatures_sections(q)
-
-    # Always show scoring hooks (if calculator has results)
-    render_scoring_hooks()
+    render_signatures_sections(q.payload, calc_override=calc)
 
     # Always show source section
     render_sources(q)

@@ -14,20 +14,20 @@ and optionally add small, safe "add-on" snippets based on:
 
 Design goals
 ------------
-- Never break existing behavior: if no layers match, return "".
+- Never break existing behavior: if no layers match, return "" (for text) and empty lists (for structured).
 - Keep add-ons short and "non-disruptive" (1–3 bullets or 1 short paragraph).
 - Avoid changing base answers. We only append add-ons.
 
 Usage (in signatures_engine.py)
 -------------------------------
-from answer_layers import build_answer_addons, build_layered_answer_structured
+# Text:
+addon_text = build_answer_addons_text(q, calc_context=calc, style=style_key)
+final_text = base if not addon_text else f"{base}\n\n{addon_text}"
 
-addon = build_answer_addons(q, calc_context=calc, style=style_key)
-final_text = base if not addon else f"{base}\n\n{addon}"
-
-# Structured:
+# Structured (LLM-friendly):
 payload = build_layered_answer_structured(q, base=base, calc_context=calc, style=style_key)
 print(payload["final"])
+# payload contains: {"base","addons","why_added","final"}
 """
 
 from __future__ import annotations
@@ -35,8 +35,13 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 
+# -----------------------------
+# Helpers (local + safe)
+# -----------------------------
 def _safe_strip(x: Any) -> str:
-    return str(x).strip() if x is not None else ""
+    if x is None:
+        return ""
+    return str(x).strip()
 
 
 def _as_list(x: Any) -> List[Any]:
@@ -63,130 +68,6 @@ def _normalize_persona(persona: str) -> str:
     return mapping.get(persona, p)
 
 
-def build_answer_addons(
-    question_payload: Dict[str, Any],
-    calc_context: Optional[Dict[str, Any]] = None,
-    style: str = "listener",
-) -> Dict[str, Any]:
-    """
-    Return a dict in the LLM-friendly format:
-      {
-        "base": "...",                 # optional here, engine will fill base
-        "addons": ["...", "..."],
-        "why_added": ["CAD active", "trust low"]
-      }
-
-    This function should NEVER throw. If no addons apply, return empty lists.
-    """
-    calc = calc_context or {}
-    persona = _normalize_persona(style)
-
-    addons: List[str] = []
-    why_added: List[str] = []
-
-    # -----------------------------
-    # Example rule #1: Condition modifiers selected
-    # -----------------------------
-    # We look for calc["condition_modifiers"] shaped like {"CAD": "Yes"/True, ...}
-    cm = calc.get("condition_modifiers") or {}
-    if isinstance(cm, dict):
-        # Pick only those that look "selected"
-        selected = []
-        for k, v in cm.items():
-            # treat "Yes", True, 1 as selected; everything else not selected
-            sv = str(v).strip().lower()
-            is_selected = (v is True) or (sv in ("yes", "y", "true", "1"))
-            if is_selected:
-                selected.append(str(k).strip())
-
-        # Example: if CAD selected, add a CAD-specific line
-        if "CAD" in selected:
-            addons.append("Because CAD is active in your profile, prioritize symptom awareness (chest pressure, breathlessness) and follow your care plan closely.")
-            why_added.append("CAD active")
-
-        if "HF" in selected:
-            addons.append("Because HF is active, watch daily weight and swelling, and act early on fluid changes per your plan.")
-            why_added.append("HF active")
-
-        if "AF" in selected or "AFIB" in selected:
-            addons.append("Because AF is active, stroke prevention and rhythm/rate monitoring are especially important.")
-            why_added.append("AF active")
-
-    # -----------------------------
-    # Example rule #2: Engagement driver tailoring
-    # -----------------------------
-    # We look for calc["engagement_drivers"] shaped like {"trust": -1, "selfefficacy": 1, ...}
-    ed = calc.get("engagement_drivers") or {}
-    if isinstance(ed, dict):
-        trust = ed.get("trust", 0)
-        if isinstance(trust, (int, float)) and trust < 0:
-            if persona in ("listener", "motivator"):
-                addons.append("If trust feels low right now, it’s okay to ask for simpler explanations and a clear next step—your questions are valid.")
-            else:
-                addons.append("If trust is low, ask for a one-page plan (meds, goals, warning signs, follow-up). Clarity supports confidence and adherence.")
-            why_added.append("trust low")
-
-    # -----------------------------
-    # Return structured payload (NO base here; engine provides it)
-    # -----------------------------
-    return {
-        "addons": [a for a in (_safe_strip(x) for x in addons) if a],
-        "why_added": [w for w in (_safe_strip(x) for x in why_added) if w],
-    }
-
-
-def _apply_answer_layers(
-    base_text: str,
-    question_payload: Dict[str, Any],
-    persona: str,
-    calc_context: Optional[Dict[str, Any]] = None,
-) -> Tuple[str, Dict[str, Any]]:
-    """
-    Engine-facing wrapper:
-      returns (final_text, layer_meta)
-    where layer_meta is ALWAYS:
-      { "base": str, "addons": [str], "why_added": [str] }
-    """
-    base = _safe_strip(base_text)
-
-    # Best-effort addon extraction; never break output
-    pkg: Dict[str, Any] = {"addons": [], "why_added": []}
-    try:
-        pkg = build_answer_addons(
-            question_payload=question_payload,
-            calc_context=calc_context or {},
-            style=persona,
-        ) or pkg
-    except Exception:
-        pkg = {"addons": [], "why_added": []}
-
-    addons = pkg.get("addons", [])
-    why_added = pkg.get("why_added", [])
-
-    # Normalize
-    addons_list = [x for x in (_safe_strip(a) for a in _as_list(addons)) if x]
-    why_list = [x for x in (_safe_strip(w) for w in _as_list(why_added)) if x]
-
-    # Build final text
-    addon_block = "\n".join(addons_list).strip()
-    final = (base + "\n\n" + addon_block).strip() if addon_block else base
-
-    layer_meta = {
-        "base": base,
-        "addons": addons_list,
-        "why_added": why_list,
-    }
-    return final, layer_meta
-
-# -----------------------------
-# Helpers (local + safe)
-# -----------------------------
-def _safe_strip(x: Any) -> str:
-    if x is None:
-        return ""
-    return str(x).strip()
-
-
 def _is_selected(value: Any) -> bool:
     """
     Interpret condition flags robustly.
@@ -198,7 +79,6 @@ def _is_selected(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
-        # treat any nonzero as selected
         return value != 0
     s = _safe_strip(value).lower()
     if s in ("", "none", "null", "na", "n/a", "unknown"):
@@ -207,7 +87,7 @@ def _is_selected(value: Any) -> bool:
         return False
     if s in ("yes", "y", "true", "1", "selected", "present", "positive"):
         return True
-    # fallback: if it's a non-empty string, assume it's "selected"
+    # fallback: non-empty string -> assume selected
     return True
 
 
@@ -410,7 +290,7 @@ REQUIRE_QUESTION_RELEVANCE_FOR_CONDITION_ADDONS = False
 
 
 # -----------------------------
-# Internal collector (NEW)
+# Internal collector (source of truth)
 # -----------------------------
 def _collect_addons_and_reasons(
     question: Dict[str, Any],
@@ -473,6 +353,7 @@ def _collect_addons_and_reasons(
             continue
         if val not in (-1, 0, 1) or val == 0:
             continue
+
         matched_drivers[driver_key] = val
 
         for line in variants.get(val, []):
@@ -490,42 +371,23 @@ def _collect_addons_and_reasons(
 
 
 # -----------------------------
-# Main builder (UNCHANGED public API)
+# Public API (LLM-friendly structured)
 # -----------------------------
-def build_answer_addons(
-    question: Dict[str, Any],
-    calc_context: Optional[Dict[str, Any]],
-    style: str,
-) -> str:
-    """
-    Returns a single string with optional add-on content.
-
-    If no add-ons match, returns "".
-    """
-    addons, _why, _debug = _collect_addons_and_reasons(question, calc_context)
-    if not addons:
-        return ""
-
-    # Keep it compact: two small sections (conditions + drivers) is nice,
-    # but your requested JSON is flat. For this string version, we keep it simple:
-    return _bullets(addons).strip()
-
-
-# Optional: structured form (useful for future LLM prompting)
 def build_answer_addons_structured(
     question: Dict[str, Any],
-    calc_context: Optional[Dict[str, Any]],
-    style: str,
+    calc_context: Optional[Dict[str, Any]] = None,
+    style: str = "listener",
 ) -> Dict[str, Any]:
     """
-    Like build_answer_addons(), but returns:
+    Returns:
       {
-        "text": "...",
-        "addons": [...],
-        "why_added": [...],
-        "debug": {...}
+        "text": "- ...\\n- ...",     # bullet text block (or "")
+        "addons": [...],            # list of addon lines
+        "why_added": [...],         # list of reasons
+        "debug": {...}              # safe debugging info
       }
     """
+    _ = _normalize_persona(style)  # currently unused, but kept for future persona-specific rules
     addons, why_added, debug = _collect_addons_and_reasons(question, calc_context)
     text = _bullets(addons).strip() if addons else ""
     return {
@@ -536,14 +398,23 @@ def build_answer_addons_structured(
     }
 
 
-# -----------------------------
-# NEW: Answers structure
-# -----------------------------
+def build_answer_addons_text(
+    question: Dict[str, Any],
+    calc_context: Optional[Dict[str, Any]] = None,
+    style: str = "listener",
+) -> str:
+    """
+    Backward-compatible: returns ONLY the add-on text block (or "").
+    """
+    payload = build_answer_addons_structured(question, calc_context=calc_context, style=style)
+    return _safe_strip(payload.get("text", ""))
+
+
 def build_layered_answer_structured(
     question: Dict[str, Any],
     base: str,
-    calc_context: Optional[Dict[str, Any]],
-    style: str,
+    calc_context: Optional[Dict[str, Any]] = None,
+    style: str = "listener",
 ) -> Dict[str, Any]:
     """
     Returns exactly the payload you asked for:
@@ -556,7 +427,10 @@ def build_layered_answer_structured(
     }
     """
     base_s = _safe_strip(base)
-    addons, why_added, _debug = _collect_addons_and_reasons(question, calc_context)
+    payload = build_answer_addons_structured(question, calc_context=calc_context, style=style)
+
+    addons = payload.get("addons", []) if isinstance(payload, dict) else []
+    why_added = payload.get("why_added", []) if isinstance(payload, dict) else []
 
     addon_text = _bullets(addons).strip() if addons else ""
     final = (base_s + "\n\n" + addon_text).strip() if addon_text else base_s
@@ -567,3 +441,38 @@ def build_layered_answer_structured(
         "why_added": why_added,
         "final": final,
     }
+
+
+# -----------------------------
+# Engine-facing wrapper (optional, but matches your signatures_engine usage)
+# -----------------------------
+def _apply_answer_layers(
+    base_text: str,
+    question_payload: Dict[str, Any],
+    persona: str,
+    calc_context: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Returns (final_text, layer_meta) where layer_meta is ALWAYS:
+      { "base": str, "addons": [str], "why_added": [str] }
+    """
+    base = _safe_strip(base_text)
+
+    try:
+        payload = build_layered_answer_structured(
+            question=question_payload,
+            base=base,
+            calc_context=calc_context,
+            style=persona,
+        )
+    except Exception:
+        payload = {"base": base, "addons": [], "why_added": [], "final": base}
+
+    final = _safe_strip(payload.get("final", base))
+
+    layer_meta = {
+        "base": _safe_strip(payload.get("base", base)),
+        "addons": payload.get("addons", []) if isinstance(payload.get("addons", []), list) else [],
+        "why_added": payload.get("why_added", []) if isinstance(payload.get("why_added", []), list) else [],
+    }
+    return final, layer_meta
