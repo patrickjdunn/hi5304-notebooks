@@ -507,38 +507,40 @@ def _mlc_tier(mlc_score: Any) -> str:
     return "Low CVH"
 
 
-def _prevent_tier(risk_value: Any, horizon: str = "10yr") -> str:
-    """Heuristic risk tier labels (for interpretation; not a diagnosis).
-
-    10-year tiers align with commonly used ASCVD-style groupings:
-      <5% Low, 5–<7.5% Borderline, 7.5–<20% Intermediate, >=20% High
-
-    30-year tiers are broader pragmatic buckets for readability.
+def _prevent_tier(risk: float, horizon: str = "10yr") -> str:
+    """
+    risk: probability 0–1
+    horizon: "10yr" or "30yr"
     """
     try:
-        x = float(risk_value)
+        r_pct = float(risk) * 100.0
     except Exception:
         return ""
 
-    pct = x if x > 1.0 else x * 100.0
+    h = str(horizon).lower()
 
-    if horizon.lower().startswith("30"):
-        if pct < 20:
+    # -------------------------
+    # 10-year tiering (YOUR RULE)
+    # -------------------------
+    # High risk if >7.5%
+    if "10" in h:
+        if r_pct < 5.0:
             return "Low"
-        if pct < 30:
-            return "Moderate"
-        if pct < 40:
-            return "High"
-        return "Very High"
+        if r_pct <= 7.5:
+            return "Borderline"
+        return "High"
 
-    if pct < 5:
+    # -------------------------
+    # 30-year tiering (leave as-is unless you want different)
+    # -------------------------
+    if r_pct < 20.0:
         return "Low"
-    if pct < 7.5:
-        return "Borderline"
-    if pct < 20:
-        return "Intermediate"
+    if r_pct < 40.0:
+        return "Moderate"
     return "High"
 
+
+    
 def _is_selected(v: Any) -> bool:
     """
     Returns True only when the value clearly represents an active/selected state.
