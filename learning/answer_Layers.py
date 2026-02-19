@@ -3,30 +3,22 @@
 Answer Layers for Signatures
 ============================
 
-This module lets you keep *questions.py* as stable base content while safely
-adding short, optional "answer layers" (add-ons) based on runtime context from
-combined_calculator.py (RESULTS dict).
+Goal
+----
+Keep `questions.py` as the stable base content, and optionally append short,
+low-risk "add-on" snippets based on the calculator context (combined_calculator RESULTS).
 
-Key ideas
----------
-- Base answers live in questions.py and should not be mutated here.
-- Layers are appended (never replace).
-- If nothing matches, output is unchanged.
+Inputs this module expects (best-effort; all optional):
+- calc_context["condition_modifiers"] : dict of flags (e.g., {"CAD": "Yes", "HF": False, ...})
+- calc_context["engagement_drivers"]  : dict of -1/0/+1 (e.g., {"trust": -1, "selfefficacy": 1, ...})
+- calc_context["prevent"]             : dict of PREVENT risks (e.g., {"cvd_10yr": 0.08, ...})
+- calc_context["scores"]              : dict of other scores (optional)
 
-Public API
-----------
-1) build_answer_addons(question, calc_context, style) -> str
-2) build_answer_addons_structured(question, calc_context, style) -> dict
-3) build_layered_answer_structured(question, base, calc_context, style) -> dict
-
-Structured payload format (LLM-friendly)
-----------------------------------------
-{
-  "base": "...",
-  "addons": ["...", "..."],
-  "why_added": ["CAD active", "trust -1", "cvd_10yr > 7.5%"],
-  "final": "base\\n\\n- addon...\\n- addon..."
-}
+Public API (engine-safe)
+------------------------
+- build_answer_addons(question, calc_context, style) -> str
+- build_answer_addons_structured(question, calc_context, style) -> dict
+- build_layered_answer_structured(question, base, calc_context, style) -> dict
 """
 
 from __future__ import annotations
@@ -34,10 +26,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 
-# =============================================================================
-# Helpers (local + safe)
-# =============================================================================
-
+# -----------------------------
+# Safe helpers
+# -----------------------------
 def _safe_strip(x: Any) -> str:
     if x is None:
         return ""
@@ -50,24 +41,6 @@ def _as_list(x: Any) -> List[Any]:
     if isinstance(x, list):
         return x
     return [x]
-
-
-def _bullets(items: List[str]) -> str:
-    lines = [f"- {_safe_strip(x)}" for x in items if _safe_strip(x)]
-    return "\n".join(lines).strip()
-
-
-def _normalize_persona(style: str) -> str:
-    """
-    Normalize style/persona to lowercase keys used by the engine:
-      listener / motivator / director / expert
-    """
-    s = _safe_strip(style).lower()
-    if s in ("listener", "motivator", "director", "expert"):
-        return s
-    # tolerate numbered prompts etc.
-    mapping = {"1": "listener", "2": "motivator", "3": "director", "4": "expert"}
-    return mapping.get(s, s or "listener")
 
 
 def _is_selected(value: Any) -> bool:
@@ -89,13 +62,12 @@ def _is_selected(value: Any) -> bool:
         return False
     if s in ("yes", "y", "true", "1", "selected", "present", "positive"):
         return True
-    # fallback: non-empty string -> treat as selected
+    # fallback: any non-empty string counts as selected
     return True
 
 
-def _get_block(calc_context: Optional[Dict[str, Any]], key: str) -> Dict[str, Any]:
-    calc_context = calc_context if isinstance(calc_context, dict) else {}
-    v = calc_context.get(key)
+def _get_calc_block(calc_context: Dict[str, Any], key: str) -> Dict[str, Any]:
+    v = (calc_context or {}).get(key)
     return v if isinstance(v, dict) else {}
 
 
@@ -112,78 +84,127 @@ def _get_question_condition_tags(question: Dict[str, Any]) -> List[str]:
     return []
 
 
-# =============================================================================
-# Layer catalogs
-# =============================================================================
+def _bullets(items: List[str]) -> str:
+    items2 = [f"- {_safe_strip(x)}" for x in items if _safe_strip(x)]
+    return "\n".join(items2)
 
-# Condition-specific add-ons. Keep short and “safe”.
+
+def _get_prevent_block(calc_context: Dict[str, Any]) -> Dict[str, Any]:
+    # Prefer calc_context["prevent"]; fall back to calc_context["scores"]["prevent_results"] etc if you later add.
+    prevent = (calc_context or {}).get("prevent")
+    return prevent if isinstance(prevent, dict) else {}
+
+
+def _coerce_float(x: Any) -> Optional[float]:
+    try:
+        if x is None:
+            return None
+        if isinstance(x, (int, float)):
+            return float(x)
+        s = _safe_strip(x)
+        if not s:
+            return None
+        # handle percent strings like "7.5%"
+        if s.endswith("%"):
+            return float(s[:-1].strip()) / 100.0
+        return float(s)
+    except Exception:
+        return None
+
+
+# -----------------------------
+# Add-on catalogs (single-condition, single-driver)
+# -----------------------------
 CONDITION_ADDONS: Dict[str, Dict[str, Any]] = {
     "CAD": {
 
         "lines": [
-            "Because CAD is active, prioritize symptom awareness (chest pressure, unusual breathlessness) and follow your care plan closely.",
-            "Ask your clinician what your LDL-C target is and how your plan (meds + lifestyle) supports it.",
+            "If exertion brings chest pressure, unusual shortness of breath, or dizziness, stop and follow your symptom action plan.",
+            "Ask your clinician what your LDL-C target is and how your current plan supports it (meds + lifestyle).",
         ],
     },
     "AF": {
 
         "lines": [
-            "Because AF is active, stroke prevention and rhythm/rate monitoring are especially important.",
-            "Know stroke warning signs (FAST). Seek urgent care for face droop, arm weakness, or speech trouble.",
+            "Know your stroke warning signs (FAST) and your anticoagulation plan if prescribed.",
+            "If you notice sustained palpitations with fainting, chest pain, or severe breathlessness, seek urgent care.",
         ],
     },
     "HF": {
 
         "lines": [
-            "Because HF is active, monitor daily weight and swelling if advised, and act early on rapid changes per your plan.",
+            "Track daily weight and swelling if advised; rapid weight gain can signal fluid retention.",
+            "If shortness of breath suddenly worsens, or you can’t lie flat, contact your care team promptly.",
+            "Ask your clinician what sodium and fluid targets apply to you—heart failure plans are individualized.",
         ],
     },
     "HTN": {
 
         "lines": [
-            "Because HTN treatment is active, home BP technique matters: rested 5 minutes, arm at heart level, take 2 readings and average.",
+            "Home BP technique matters: seated, rested 5 minutes, arm at heart level; take 2 readings and average.",
+            "If readings are very high with symptoms (chest pain, severe headache, weakness, trouble speaking), seek urgent care.",
         ],
     },
     "DM": {
 
         "lines": [
-            "Because diabetes is active, focus on steady routines (meals, meds, activity) and discuss your A1c target and monitoring plan.",
+            "If you use insulin or meds that can cause lows, carry fast-acting carbs and know the 15–15 rule.",
+            "Ask what your A1c target is and how often to recheck based on your regimen and risk.",
         ],
     },
     "CKMH": {
 
         "lines": [
-            "Because CKM is active, think in connected systems: BP, glucose, kidney function, and cholesterol improvements work together.",
+            "These systems are connected—BP, glucose, kidney function, and lipids work together in risk reduction.",
+            "Ask how your eGFR and UACR affect your medication choices and monitoring frequency.",
         ],
     },
     "ST": {
 
         "lines": [
-            "Because stroke/TIA history is active, secondary prevention (BP, cholesterol, diabetes, rhythm control) is especially important—ask which apply to you.",
+            "Treat new one-sided weakness, facial droop, or speech trouble as an emergency (call 911).",
+            "Secondary prevention often focuses on BP, cholesterol, diabetes, and rhythm (AFib) control—ask which apply to you.",
         ],
     },
     "CH": {
 
         "lines": [
-            "Because cholesterol treatment is active, don’t stop statins abruptly—ask about dose adjustments or alternatives if side effects occur.",
+            "If you have muscle aches or concerns about statins, don’t stop abruptly—ask about dose adjustments or alternatives.",
+            "Recheck your lipid panel on the schedule your clinician recommends to confirm you’re at goal.",
         ],
     },
 }
 
-# Engagement driver add-ons (by -1/0/+1)
+
 ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
     "trust": {
         -1: [
             "If trust feels low right now, it’s okay to ask for simpler explanations and a clear next step—your questions are valid.",
-            "Ask: “What’s the benefit, what’s the downside, and what are my options?”",
+            "Try: “What’s the benefit, what’s the downside, and what are my options?”",
         ],
         1: [
-            "Since you’re engaged with your care, consider bringing tracked data (BP, steps, symptoms) to fine-tune the plan with your clinician.",
+            "Since you’re engaged with your care, consider bringing tracked data (BP, steps, symptoms) to refine the plan together.",
+        ],
+    },
+    "health_literacy": {
+        -1: [
+            "Here’s the short version: pick 1 change this week, track it for 7 days, and bring the results to your next visit.",
+        ],
+        1: [
+            "If you like details, ask for exact targets (BP, LDL, A1c) and how your numbers are trending over time.",
+        ],
+    },
+    "readiness_for_change": {
+        -1: [
+            "No pressure to change everything today—choose the smallest step that feels realistic and start there.",
+        ],
+        1: [
+            "Since you feel ready, pick one “next-step” goal and set a check-in date to review progress.",
         ],
     },
     "selfefficacy": {
         -1: [
-            "Let’s make this easier: choose a 5-minute starter step you can succeed with, then build from wins.",
+            "Let’s make this easier: define a 5-minute starter step you can succeed with, then build from wins.",
         ],
         1: [
             "You seem confident—use that strength to build a simple routine and track streaks.",
@@ -194,60 +215,155 @@ ENGAGEMENT_ADDONS: Dict[str, Dict[int, List[str]]] = {
             "If this feels like a lot, start by writing 2 questions for your next visit—momentum often starts with clarity.",
         ],
         1: [
-            "You’re being proactive—consider a weekly “health planning” time to review meds, activity, and symptoms.",
-        ],
-    },
-    "readiness_for_change": {
-        -1: [
-            "No pressure to change everything today—choose the smallest step that feels realistic and start there.",
-        ],
-        1: [
-            "Since you feel ready, choose one “next-step” goal and set a check-in date to review progress.",
-        ],
-    },
-    "health_literacy": {
-        -1: [
-            "Here’s the short version: pick 1 change this week, track it for 7 days, and bring the results to your next visit.",
-        ],
-        1: [
-            "If you like details, ask for your exact targets (BP, LDL, A1c) and how your numbers are trending over time.",
-        ],
-    },
-    "goal_orientation": {
-        -1: [
-            "Try one SMART goal (specific, measurable, achievable, relevant, time-bound)—example: walk 10 minutes after dinner 5 days this week.",
-        ],
-        1: [
-            "Pick a measurable target for the next 7 days and track it daily (minutes, steps, BP, or sleep).",
-        ],
-    },
-    "access_to_healthcare": {
-        -1: [
-            "If appointments are hard to access, ask about telehealth follow-ups, remote monitoring, or community-based resources.",
-        ],
-        1: [
-            "Since you can access care, consider scheduling a follow-up date now to review progress and adjust the plan.",
+            "You’re being proactive—consider a weekly ‘health planning’ time to review meds, activity, and symptoms.",
         ],
     },
 }
 
-# Risk-tier triggered add-ons (NEW)
-# Trigger: 10-year CVD risk > 7.5%
-RISK_TIER_ADDONS: Dict[str, List[str]] = {
-    "default": [
-        "Because your 10-year CVD risk is above 7.5%, it’s worth discussing a more intensive prevention plan (BP, LDL-C, diabetes control, smoking status, and activity).",
-        "Ask: “What are my top 2 risk drivers, and what change this month would reduce my risk the most?”",
-    ]
-}
-
-# If True, condition add-ons only apply if the question has matching condition tags.
+# If True, condition add-ons only apply when the question tags include that condition.
 REQUIRE_QUESTION_RELEVANCE_FOR_CONDITION_ADDONS = False
 
 
-# =============================================================================
-# Internal collector (core of the system)
-# =============================================================================
+# -----------------------------
+# Conflict resolution (cross-condition)
+# -----------------------------
+def _apply_conflict_resolution(
+    addons: List[str],
+    why_added: List[str],
+    active_conditions: List[str],
+    prevent: Dict[str, Any],
+) -> Tuple[List[str], List[str]]:
+    """
+    Resolves cross-condition conflicts by:
+      1) removing/avoiding duplicates
+      2) replacing generic guidance with combined guidance
 
+    Implemented combos:
+      - HF + CKMH + HTN: BP targets + diuretics + sodium
+      - DM + CKMH: A1c targets + hypoglycemia risk + kidney meds
+      - AF + ST: anticoagulation emphasis + FAST
+    """
+    active = set([c.strip().upper() for c in (active_conditions or []) if _safe_strip(c)])
+
+    # Deduplicate while preserving order
+    seen = set()
+    deduped: List[str] = []
+    for line in addons:
+        line_s = _safe_strip(line)
+        if not line_s:
+            continue
+        key = line_s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(line_s)
+    addons = deduped
+
+    def _remove_if_contains(substrs: List[str]) -> None:
+        nonlocal addons
+        subs = [s.lower() for s in substrs if _safe_strip(s)]
+        if not subs:
+            return
+        addons = [a for a in addons if all(s not in a.lower() for s in subs)]
+
+    # -----------------------------
+    # HF + CKMH + HTN
+    # -----------------------------
+    if {"HF", "CKMH", "HTN"}.issubset(active):
+        # remove any prior sodium/BP-target fragments to avoid contradictions
+        _remove_if_contains(["sodium", "fluid", "bp", "blood pressure goal", "target bp", "diuretic"])
+
+        addons.insert(
+            0,
+            "Because HF + CKM + HTN overlap, your BP goal, diuretic plan, and sodium/fluid targets should be set together by your clinician. A common BP target is <130/80 if tolerated, but kidney function, symptoms (dizziness), and meds can change the best target for you.",
+        )
+        addons.insert(
+            1,
+            "If you’re on diuretics, ask what weight change or symptoms should trigger a call (and when NOT to change doses on your own).",
+        )
+        addons.insert(
+            2,
+            "For sodium: ask for a specific daily target (often in the 1,500–2,000 mg/day range for HF), and confirm what applies to you given CKM stage and BP control.",
+        )
+        why_added.append("HF+CKMH+HTN conflict-resolved")
+
+    # -----------------------------
+    # DM + CKMH
+    # -----------------------------
+    if {"DM", "CKMH"}.issubset(active):
+        _remove_if_contains(["a1c", "hypogly", "kidney", "egfr", "uacr", "sglt", "glp"])
+
+        addons.insert(
+            0,
+            "Because diabetes + CKM overlap, A1c targets should be individualized (age, kidney function, meds, hypoglycemia risk). Ask your clinician what target is safest for you.",
+        )
+        addons.insert(
+            1,
+            "If you’ve had low blood sugar or you’re on insulin/sulfonylureas, confirm a ‘low glucose plan’ and what to do during illness or reduced eating.",
+        )
+        addons.insert(
+            2,
+            "Ask whether kidney-protective diabetes meds (when appropriate) are part of your plan, and what monitoring (eGFR/UACR) you need.",
+        )
+        why_added.append("DM+CKMH conflict-resolved")
+
+    # -----------------------------
+    # AF + ST
+    # -----------------------------
+    if {"AF", "ST"}.issubset(active):
+        _remove_if_contains(["fast", "anticoag", "blood thinner", "stroke warning"])
+
+        addons.insert(
+            0,
+            "Because AFib + prior stroke/TIA overlap, stroke prevention is a top priority—ask how your stroke-risk score guides anticoagulation (blood thinners) and what bleeding precautions apply.",
+        )
+        addons.insert(
+            1,
+            "Review FAST (Face droop, Arm weakness, Speech difficulty, Time to call 911) and keep an emergency plan visible at home.",
+        )
+        why_added.append("AF+ST conflict-resolved")
+
+    # -----------------------------
+    # Risk-tier triggered layer: 10yr CVD > 7.5%
+    # -----------------------------
+    cvd10 = _coerce_float(prevent.get("cvd_10yr")) if isinstance(prevent, dict) else None
+    if isinstance(cvd10, float) and cvd10 > 0.075:
+        # keep it short and non-prescriptive
+        addons.append(
+            "Your 10-year CVD risk is above 7.5%. Ask about intensifying prevention: BP/lipids/smoking (if relevant), and whether medication changes (e.g., statin intensity) are appropriate for your situation."
+        )
+        why_added.append("10yr CVD risk >7.5%")
+
+    # Final dedupe again (conflict inserts may reintroduce overlaps)
+    seen = set()
+    out: List[str] = []
+    for line in addons:
+        key = _safe_strip(line).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(_safe_strip(line))
+    addons = out
+
+    # Deduplicate why_added
+    why_seen = set()
+    why_out: List[str] = []
+    for w in why_added:
+        ws = _safe_strip(w)
+        if not ws:
+            continue
+        if ws in why_seen:
+            continue
+        why_seen.add(ws)
+        why_out.append(ws)
+    why_added = why_out
+
+    return addons, why_added
+
+
+# -----------------------------
+# Collector
+# -----------------------------
 def _collect_addons_and_reasons(
     question: Dict[str, Any],
     calc_context: Optional[Dict[str, Any]],
@@ -255,36 +371,35 @@ def _collect_addons_and_reasons(
 ) -> Tuple[List[str], List[str], Dict[str, Any]]:
     """
     Returns:
-      addons: [line1, line2, ...]   (flat list of bullet lines)
+      addons: [line1, line2, ...]
       why_added: ["CAD active", "trust -1", ...]
-      debug: { ... }                (safe debug info)
+      debug: { ... }  (safe debug info)
     """
-    addons: List[str] = []
-    why: List[str] = []
-    debug: Dict[str, Any] = {}
 
     question = question if isinstance(question, dict) else {}
     calc_context = calc_context if isinstance(calc_context, dict) else {}
-    persona = _normalize_persona(style)
 
-    calc_conditions = _get_block(calc_context, "condition_modifiers")
-    calc_drivers = _get_block(calc_context, "engagement_drivers")
-    prevent_block = _get_block(calc_context, "prevent")  # where your 6 risks live
+
+    calc_conditions = _get_calc_block(calc_context, "condition_modifiers")
+    calc_drivers = _get_calc_block(calc_context, "engagement_drivers")
+    prevent = _get_prevent_block(calc_context)
 
     q_condition_tags = set(_get_question_condition_tags(question))
 
-    # -----------------------------
-    # Active conditions -> addons
-    # -----------------------------
+    addons: List[str] = []
+    why: List[str] = []
+
+    # Active conditions (from calculator)
     active_conditions: List[str] = []
-    for code, raw in calc_conditions.items():
-        code_u = _safe_strip(code).upper()
-        if not code_u:
-            continue
-        if _is_selected(raw):
-            active_conditions.append(code_u)
+    if isinstance(calc_conditions, dict):
+        for code, raw in calc_conditions.items():
+            code_u = _safe_strip(code).upper()
+            if not code_u:
+                continue
+            if _is_selected(raw):
+                active_conditions.append(code_u)
 
-
+    # Condition add-ons
     for cond in active_conditions:
         if cond not in CONDITION_ADDONS:
             continue
@@ -292,100 +407,62 @@ def _collect_addons_and_reasons(
         if REQUIRE_QUESTION_RELEVANCE_FOR_CONDITION_ADDONS:
             if q_condition_tags and (cond not in q_condition_tags):
                 continue
-
-        lines = CONDITION_ADDONS.get(cond, {}).get("lines", [])
+        payload = CONDITION_ADDONS.get(cond, {})
+        lines = payload.get("lines", [])
         if isinstance(lines, list):
             for line in lines:
-                line_s = _safe_strip(line)
-                if line_s:
-                    addons.append(line_s)
-        why.append(f"{cond} active")
+                s = _safe_strip(line)
+                if s:
+                    addons.append(s)
+            why.append(f"{cond} active")
 
-    debug["active_conditions"] = active_conditions
-    debug["question_condition_tags"] = sorted(list(q_condition_tags))
-
-    # -----------------------------
-    # Engagement drivers -> addons
-    # -----------------------------
+    # Engagement driver add-ons
     matched_drivers: Dict[str, int] = {}
-    for driver_key, variants in ENGAGEMENT_ADDONS.items():
-        if driver_key not in calc_drivers:
-            continue
-        try:
-            val = int(calc_drivers.get(driver_key))
-        except Exception:
-            continue
-        if val == 0 or val not in (-1, 0, 1):
-            continue
+    if isinstance(calc_drivers, dict):
+        for driver_key, variants in ENGAGEMENT_ADDONS.items():
+            if driver_key not in calc_drivers:
+                continue
+            try:
+                val = int(calc_drivers.get(driver_key))
+            except Exception:
+                continue
+            if val not in (-1, 0, 1) or val == 0:
+                continue
+            matched_drivers[driver_key] = val
+            for line in variants.get(val, []):
+                s = _safe_strip(line)
+                if s:
+                    addons.append(s)
+            why.append(f"{driver_key} {val}")
 
-        matched_drivers[driver_key] = val
+    # Cross-condition conflict resolution + risk trigger
+    addons, why = _apply_conflict_resolution(
+        addons=addons,
+        why_added=why,
+        active_conditions=active_conditions,
+        prevent=prevent,
+    )
 
-        for line in variants.get(val, []):
-            line_s = _safe_strip(line)
-            if line_s:
-                addons.append(line_s)
-        why.append(f"{driver_key} {val}")
-
-    debug["matched_drivers"] = matched_drivers
-
-    # -----------------------------
-    # Risk-tier trigger (NEW)
-    # -----------------------------
-    cvd_10yr = prevent_block.get("cvd_10yr")
-    if isinstance(cvd_10yr, (int, float)) and cvd_10yr > 0.075:
-        # You can tailor by persona if you want; keep it safe and short
-        risk_lines = list(RISK_TIER_ADDONS.get("default", []))
-        if persona == "listener":
-            risk_lines.insert(0, "It makes sense to feel concerned—higher risk is information, not a sentence. We can use it to focus your next steps.")
-        elif persona == "motivator":
-            risk_lines.insert(0, "This is a great moment to get proactive—small changes can make a meaningful difference in risk.")
-        elif persona == "director":
-            risk_lines.insert(0, "Next-step focus: confirm targets (BP, LDL-C, A1c), tighten your weekly activity plan, and schedule follow-up to reassess.")
-        elif persona == "expert":
-            risk_lines.insert(0, "A 10-year CVD risk above 7.5% is commonly used as a threshold to consider intensified preventive strategies in shared decision-making.")
-        for line in risk_lines:
-            line_s = _safe_strip(line)
-            if line_s:
-                addons.append(line_s)
-        why.append("cvd_10yr > 7.5%")
-
-        debug["cvd_10yr"] = cvd_10yr
-
-    # De-dup (keep order)
-    seen: set = set()
-    deduped_addons: List[str] = []
-    for a in addons:
-        if a not in seen:
-            seen.add(a)
-            deduped_addons.append(a)
-
-    # keep why unique but ordered
-    seen_w: set = set()
-    deduped_why: List[str] = []
-    for w in why:
-        if w not in seen_w:
-            seen_w.add(w)
-            deduped_why.append(w)
-
-    return deduped_addons, deduped_why, debug
+    debug = {
+        "active_conditions": active_conditions,
+        "question_condition_tags": sorted(list(q_condition_tags)),
+        "matched_drivers": matched_drivers,
+        "prevent_keys": sorted(list(prevent.keys())) if isinstance(prevent, dict) else [],
+    }
+    return addons, why, debug
 
 
-# =============================================================================
-# Public APIs
-# =============================================================================
-
+# -----------------------------
+# Public API
+# -----------------------------
 def build_answer_addons(
     question: Dict[str, Any],
     calc_context: Optional[Dict[str, Any]] = None,
     style: str = "listener",
 ) -> str:
-    """
-    Returns a single string with optional add-on content.
-
-    If no add-ons match, returns "".
-    """
+    """Return a single string with optional add-on content; or "" if none."""
     addons, _why, _debug = _collect_addons_and_reasons(question, calc_context, style)
-    return _bullets(addons) if addons else ""
+    return _bullets(addons).strip() if addons else ""
 
 
 def build_answer_addons_structured(
@@ -396,7 +473,7 @@ def build_answer_addons_structured(
     """
     Returns:
       {
-        "text": "...",          # bullet string
+        "text": "- ...\n- ...",
         "addons": [...],
         "why_added": [...],
         "debug": {...}
@@ -404,7 +481,7 @@ def build_answer_addons_structured(
     """
     addons, why_added, debug = _collect_addons_and_reasons(question, calc_context, style)
     return {
-        "text": _bullets(addons) if addons else "",
+        "text": _bullets(addons).strip() if addons else "",
         "addons": addons,
         "why_added": why_added,
         "debug": debug,
@@ -418,23 +495,23 @@ def build_layered_answer_structured(
     style: str = "listener",
 ) -> Dict[str, Any]:
     """
-    Returns the LLM-friendly payload you requested:
+    Returns an LLM-friendly payload:
 
     {
       "base": "...",
       "addons": ["...", "..."],
-      "why_added": ["CAD active", "trust -1", "cvd_10yr > 7.5%"],
-      "final": "base\\n\\n- addon...\\n- addon..."
+      "why_added": ["CAD active", "trust -1"],
+      "final": "base\n\n- addon...\n- addon..."
     }
     """
     base_s = _safe_strip(base)
-    addons, why_added, _debug = _collect_addons_and_reasons(question, calc_context, style)
-    addon_text = _bullets(addons) if addons else ""
+    pkg = build_answer_addons_structured(question, calc_context, style)
+    addon_text = _safe_strip(pkg.get("text", ""))
     final = (base_s + "\n\n" + addon_text).strip() if addon_text else base_s
 
     return {
         "base": base_s,
-        "addons": addons,
-        "why_added": why_added,
+        "addons": pkg.get("addons", []),
+        "why_added": pkg.get("why_added", []),
         "final": final,
     }
