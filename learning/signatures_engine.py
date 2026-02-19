@@ -7,6 +7,50 @@ import re
 import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+from answer_Layers import build_answer_addons_structured
+
+# -----------------------------
+# Demo presets (CLI)
+# -----------------------------
+DEMO_PRESETS = {
+    # Risk-tier trigger demo: 10-yr CVD risk > 7.5%
+    "risk": {
+        "prevent": {
+            "cvd_10yr": 0.102,
+            "ascvd_10yr": 0.081,
+            "hf_10yr": 0.030,
+            "cvd_30yr": 0.280,
+            "ascvd_30yr": 0.210,
+            "hf_30yr": 0.120,
+        },
+        "condition_modifiers": {"CAD": "Yes"},
+        "engagement_drivers": {"selfefficacy": 1, "proactiveness": 1, "trust": 0},
+    },
+
+    # Conflict demo: HF + CKMH + HTN
+    "hf_ckmh_htn": {
+        "condition_modifiers": {"HF": "Yes", "CKMH": "Yes", "HTN": "Yes"},
+        "prevent": {"cvd_10yr": 0.052},
+        "engagement_drivers": {"trust": 0},
+    },
+
+    # Conflict demo: DM + CKMH
+    "dm_ckmh": {
+        "condition_modifiers": {"DM": "Yes", "CKMH": "Yes"},
+        "prevent": {"cvd_10yr": 0.061},
+        "engagement_drivers": {"trust": 0},
+        "inputs": {"A1c": 8.4, "egfr": 42, "uacr": 220},  # optional: makes the story obvious
+    },
+
+    # Conflict demo: AF + ST
+    "af_st": {
+        "condition_modifiers": {"AF": "Yes", "ST": "Yes"},
+        "prevent": {"cvd_10yr": 0.061},
+        "engagement_drivers": {"trust": -1},
+    },
+}
+
+
 
 CALC_CONTEXT: Dict[str, Any] = {}
 
@@ -1132,8 +1176,59 @@ def pick_persona() -> PersonaKey:
     persona = _normalize_persona_choice(raw)
     return persona
 
+def _parse_cli_args(argv=None):
+    """
+    Add safe CLI options without breaking interactive mode.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument(
+        "--demo",
+        choices=sorted(DEMO_PRESETS.keys()),
+        help="Apply a demo override preset (for presentations).",
+    )
+    parser.add_argument(
+        "--show-demos",
+        action="store_true",
+        help="Print available demo names and exit.",
+    )
+    return parser.parse_args(argv)
+
+
+def _apply_demo_to_calc_context(demo_name: str) -> None:
+    """
+    Mutates global CALC_CONTEXT by merging the demo preset.
+    Demo values override calculator values (because CALC_CONTEXT wins in your merge).
+    """
+    global CALC_CONTEXT
+    preset = DEMO_PRESETS.get(demo_name) or {}
+
+    # Ensure CALC_CONTEXT exists and is a dict
+    if not isinstance(CALC_CONTEXT, dict):
+        CALC_CONTEXT = {}
+
+    # Shallow merge is usually fine because preset keys are top-level blocks:
+    # condition_modifiers, inputs, engagement_drivers, prevent, scores
+    CALC_CONTEXT = {**CALC_CONTEXT, **preset}
+
+
+
 
 def main():
+    args = _parse_cli_args()
+
+    if getattr(args, "show_demos", False):
+        print("Available demos:")
+        for k in sorted(DEMO_PRESETS.keys()):
+            print(f"- {k}")
+        return
+
+    if getattr(args, "demo", None):
+        _apply_demo_to_calc_context(args.demo)
+        print(f"[DEMO] Applied preset: {args.demo}")
+
+
     # Validate bank (FIXED: pass QUESTION_BANK)
     issues = validate_question_bank(QUESTION_BANK, raise_on_error=False)
 
